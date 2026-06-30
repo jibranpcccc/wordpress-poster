@@ -265,7 +265,7 @@ export async function POST(request: Request) {
 
             // Fallback to local file if not loaded from Firestore/Remote
             if (!base64Data) {
-              const fullPath = path.join(uploadDir, img.localPath);
+              const fullPath = path.join(uploadDir, img.localPath.replace(/^\//, ''));
               if (fs.existsSync(fullPath)) {
                 const fileBuffer = fs.readFileSync(fullPath);
                 base64Data = fileBuffer.toString('base64');

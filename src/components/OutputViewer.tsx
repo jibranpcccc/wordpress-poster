@@ -15,8 +15,8 @@ export default function OutputViewer({ project, onUpdateProject }: OutputViewerP
   // Load WP settings on mount
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
-      setWpUrl(localStorage.getItem('wp_site_url') || project.wpSettings?.siteUrl || '');
-      setWpUser(localStorage.getItem('wp_username') || project.wpSettings?.username || '');
+      setWpUrl(localStorage.getItem('wp_active_site_url') || localStorage.getItem('wp_site_url') || project.wpSettings?.siteUrl || '');
+      setWpUser(localStorage.getItem('wp_active_username') || localStorage.getItem('wp_username') || project.wpSettings?.username || '');
       setWpPassword(localStorage.getItem('wp_password') || '');
     }
   }, [project.wpSettings]);
@@ -25,6 +25,7 @@ export default function OutputViewer({ project, onUpdateProject }: OutputViewerP
     setWpUrl(val);
     if (typeof window !== 'undefined') {
       localStorage.setItem('wp_site_url', val);
+      localStorage.setItem('wp_active_site_url', val);
     }
   };
 
@@ -32,6 +33,7 @@ export default function OutputViewer({ project, onUpdateProject }: OutputViewerP
     setWpUser(val);
     if (typeof window !== 'undefined') {
       localStorage.setItem('wp_username', val);
+      localStorage.setItem('wp_active_username', val);
     }
   };
 
