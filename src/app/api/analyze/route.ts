@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getOpenCodeClient } from '@/lib/opencode-client';
+import { db } from '@/lib/db';
 
 const GEMINI_KEYS = [
   "AIzaSyCiQ-DLrhWSPrY1mZ0nBaZ0QJbb2E4Unlc",
@@ -225,20 +226,43 @@ export async function POST(request: Request) {
 
         for (const img of (images || [])) {
           try {
-            const fullPath = path.join(uploadDir, img.localPath);
-            if (fs.existsSync(fullPath)) {
-              const fileBuffer = fs.readFileSync(fullPath);
-              const base64Data = fileBuffer.toString('base64');
-              const ext = path.extname(img.localPath).replace('.', '').toLowerCase();
-              
+            let base64Data = '';
+            let ext = 'jpg';
+
+            // Check if it's a Firestore image URL (contains ?id=)
+            if (img.localPath.includes('?id=')) {
+              const urlObj = new URL(img.localPath, 'http://localhost');
+              const imageId = urlObj.searchParams.get('id');
+              if (imageId) {
+                const imgAsset = await db.getImage(imageId);
+                if (imgAsset) {
+                  base64Data = imgAsset.base64Data;
+                  ext = path.extname(imageId).replace('.', '').toLowerCase();
+                  console.log(`[Analyze] Loaded image "${img.originalName}" (${imageId}) from Firestore.`);
+                }
+              }
+            }
+
+            // Fallback to local file if not loaded from Firestore
+            if (!base64Data) {
+              const fullPath = path.join(uploadDir, img.localPath);
+              if (fs.existsSync(fullPath)) {
+                const fileBuffer = fs.readFileSync(fullPath);
+                base64Data = fileBuffer.toString('base64');
+                ext = path.extname(img.localPath).replace('.', '').toLowerCase();
+                console.log(`[Analyze] Loaded image "${img.originalName}" from local filesystem.`);
+              } else {
+                console.warn(`File not found at path: ${fullPath}`);
+              }
+            }
+
+            if (base64Data) {
               imagesWithBase64.push({
                 id: img.id,
                 originalName: img.originalName,
                 base64: base64Data,
                 ext
               });
-            } else {
-              console.warn(`File not found at path: ${fullPath}`);
             }
           } catch (err) {
             console.error(`Error processing image ${img.originalName}:`, err);

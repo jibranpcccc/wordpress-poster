@@ -221,5 +221,60 @@ export const db = {
       console.error(`Failed to delete project ${id}:`, e);
       return false;
     }
+  },
+
+  saveImage: async (id: string, base64Data: string, contentType: string): Promise<void> => {
+    const fDb = getFirebaseDb();
+    if (fDb) {
+      try {
+        console.log(`[DB] Saving image asset ${id} to Firestore...`);
+        await fDb.collection('image_assets').doc(id).set({
+          id,
+          base64Data,
+          contentType,
+          createdAt: new Date().toISOString()
+        });
+        console.log(`[DB] Image asset ${id} saved to Firestore.`);
+        return;
+      } catch (e) {
+        console.error(`[DB] Failed to save image asset ${id} to Firestore:`, e);
+      }
+    }
+  },
+
+  getImage: async (id: string): Promise<{ base64Data: string; contentType: string } | null> => {
+    const fDb = getFirebaseDb();
+    if (fDb) {
+      try {
+        console.log(`[DB] Fetching image asset ${id} from Firestore...`);
+        const doc = await fDb.collection('image_assets').doc(id).get();
+        if (doc.exists) {
+          const data = doc.data();
+          if (data) {
+            return {
+              base64Data: data.base64Data,
+              contentType: data.contentType
+            };
+          }
+        }
+      } catch (e) {
+        console.error(`[DB] Failed to fetch image asset ${id} from Firestore:`, e);
+      }
+    }
+    return null;
+  },
+
+  deleteImage: async (id: string): Promise<boolean> => {
+    const fDb = getFirebaseDb();
+    if (fDb) {
+      try {
+        console.log(`[DB] Deleting image asset ${id} from Firestore...`);
+        await fDb.collection('image_assets').doc(id).delete();
+        return true;
+      } catch (e) {
+        console.error(`[DB] Failed to delete image asset ${id} from Firestore:`, e);
+      }
+    }
+    return false;
   }
 };

@@ -4,13 +4,12 @@ import path from 'path';
 import { db, Project, ImageDetail } from '@/lib/db';
 
 async function uploadAndSetImageSEO(
-  filePath: string,
+  fileBuffer: Buffer,
+  ext: string,
   img: ImageDetail,
   wpUrl: string,
   authHeader: string
 ): Promise<{ id: number; url: string }> {
-  const fileBuffer = fs.readFileSync(filePath);
-  const ext = path.extname(filePath).replace('.', '').toLowerCase();
   const mimeType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
 
   console.log(`[WP Media] Uploading binary for image: "${img.originalName}" to ${wpUrl}...`);
@@ -23,7 +22,7 @@ async function uploadAndSetImageSEO(
       'Content-Disposition': `attachment; filename="${img.seoFilename}"`,
       'Content-Type': mimeType
     },
-    body: fileBuffer
+    body: fileBuffer as any
   });
 
   if (!uploadRes.ok) {
@@ -87,17 +86,45 @@ export async function POST(request: Request) {
 
     // 3. Upload all active images to WP Media library
     for (const img of activeImages) {
-      const fullPath = path.join(uploadDir, img.localPath);
-      if (fs.existsSync(fullPath)) {
-        try {
-          const wpMedia = await uploadAndSetImageSEO(fullPath, img, cleanWpUrl, authHeader);
-          wpImageMap[img.id] = wpMedia;
-        } catch (mediaErr: any) {
-          console.error(`Failed uploading image ${img.originalName} to WordPress:`, mediaErr);
-          // Proceed anyway but log error
+      try {
+        let fileBuffer: Buffer | null = null;
+        let ext = 'jpg';
+
+        // Check if it's a Firestore image URL (contains ?id=)
+        if (img.localPath.includes('?id=')) {
+          const urlObj = new URL(img.localPath, 'http://localhost');
+          const imageId = urlObj.searchParams.get('id');
+          if (imageId) {
+            const imgAsset = await db.getImage(imageId);
+            if (imgAsset) {
+              fileBuffer = Buffer.from(imgAsset.base64Data, 'base64');
+              ext = path.extname(imageId).replace('.', '').toLowerCase();
+              console.log(`[WP Media] Loaded image "${img.originalName}" (${imageId}) from Firestore.`);
+            }
+          }
         }
-      } else {
-        console.warn(`Image file not found at: ${fullPath}`);
+
+        // Fallback to local files
+        if (!fileBuffer) {
+          const fullPath = path.join(uploadDir, img.localPath);
+          if (fs.existsSync(fullPath)) {
+            fileBuffer = fs.readFileSync(fullPath);
+            ext = path.extname(img.localPath).replace('.', '').toLowerCase();
+            console.log(`[WP Media] Loaded image "${img.originalName}" from local filesystem.`);
+          } else {
+            console.warn(`Image file not found locally or in Firestore at: ${img.localPath}`);
+          }
+        }
+
+        if (fileBuffer) {
+          const wpMedia = await uploadAndSetImageSEO(fileBuffer, ext, img, cleanWpUrl, authHeader);
+          wpImageMap[img.id] = wpMedia;
+        } else {
+          throw new Error("No image buffer found");
+        }
+      } catch (mediaErr: any) {
+        console.error(`Failed uploading image ${img.originalName} to WordPress:`, mediaErr);
+        // Proceed anyway but log error
       }
     }
 
