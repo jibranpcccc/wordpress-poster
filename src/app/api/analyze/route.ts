@@ -125,7 +125,9 @@ function cleanJsonString(str: string): string {
 // Visual analysis helper using user-supplied Gemini keys with key rotation
 async function analyzeImageWithGemini(
   img: { id: string; originalName: string; base64: string; ext: string },
-  imageIndex: number
+  imageIndex: number,
+  customGeminiKey: string | null,
+  envGeminiKey: string | null
 ) {
   let base64Data = img.base64;
   if (base64Data.includes(';base64,')) {
@@ -134,15 +136,21 @@ async function analyzeImageWithGemini(
   
   const mimeType = img.ext === 'png' ? 'image/png' : img.ext === 'webp' ? 'image/webp' : 'image/jpeg';
   
-  // Try keys in rotation starting from index
+  // Compile list of keys to try for this image
+  const keysToTry = [];
+  if (customGeminiKey) keysToTry.push({ key: customGeminiKey, label: 'User Custom Gemini Key' });
+  if (envGeminiKey) keysToTry.push({ key: envGeminiKey, label: 'Server Env Gemini Key' });
+
+  // Add the rotated keys
   for (let attempt = 0; attempt < GEMINI_KEYS.length; attempt++) {
     const keyIndex = (imageIndex + attempt) % GEMINI_KEYS.length;
-    const apiKey = GEMINI_KEYS[keyIndex];
-    
-    console.log(`Analyzing image "${img.originalName}" with Gemini key index ${keyIndex}...`);
-    
+    keysToTry.push({ key: GEMINI_KEYS[keyIndex], label: `Rotated Key Index ${keyIndex}` });
+  }
+  
+  for (const item of keysToTry) {
+    console.log(`Analyzing image "${img.originalName}" with ${item.label}...`);
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${item.key}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -169,7 +177,7 @@ async function analyzeImageWithGemini(
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
         if (text) {
           const parsed = JSON.parse(text.trim());
-          console.log(`Success analyzing "${img.originalName}":`, parsed);
+          console.log(`Success analyzing "${img.originalName}" with ${item.label}:`, parsed);
           return {
             id: img.id,
             originalName: img.originalName,
@@ -180,10 +188,10 @@ async function analyzeImageWithGemini(
         }
       } else {
         const errText = await res.text();
-        console.warn(`Key index ${keyIndex} failed for "${img.originalName}" with status ${res.status}: ${errText}`);
+        console.warn(`${item.label} failed for "${img.originalName}" with status ${res.status}: ${errText}`);
       }
     } catch (e: any) {
-      console.warn(`Exception using key index ${keyIndex} for "${img.originalName}": ${e.message}`);
+      console.warn(`Exception using ${item.label} for "${img.originalName}": ${e.message}`);
     }
   }
   
@@ -209,7 +217,8 @@ export async function POST(request: Request) {
       };
 
       try {
-        const { projectId, articleContent, mainKeyword, relatedKeywords, images, customApiKey, model: selectedModel, wpUrl } = await request.json();
+        const { projectId, articleContent, mainKeyword, relatedKeywords, images, customApiKey, customGeminiKey, model: selectedModel, wpUrl } = await request.json();
+        const envGeminiKey = process.env.GEMINI_API_KEY || null;
 
         if (!articleContent) {
           controller.enqueue(encoder.encode(JSON.stringify({ type: 'error', error: 'Article content is required' }) + '\n'));
@@ -431,151 +440,146 @@ ${preAnalyzedImagesText}`;
           userContent += `\n\nExisting Site Posts (Use these for creating internal links naturally, do not change any words):\n${existingPostsText}`;
         }
 
-        // Fallbacks: Prioritize user-selected model, then DeepSeek, then Qwen, then MiniMax, then Big-Pickle
-        const modelsToTry = [];
-        if (selectedModel) modelsToTry.push(selectedModel);
-        
-        const standardModels = [
-          'deepseek-v4-flash-free',
-          'qwen3.6-plus-free',
-          'mimo-v2.5-free',
-          'big-pickle'
-        ];
-        
-        for (const m of standardModels) {
-          if (!modelsToTry.includes(m)) {
-            modelsToTry.push(m);
-          }
-        }
+        // Model selection strategy:
+        //   1. If user selected Gemini → try that first (fast, reliable)
+        //   2. If user selected OpenCode model → try with 15s timeout
+        //   3. Fall back to Gemini (all keys, 30s timeout each)
+        //   4. Fall back to OpenCode models (each with 15s timeout)
 
-        let responseData = null;
+        let responseData: Record<string, any> | null = null;
         let successModel = '';
         let lastError: any = null;
 
-        // Try direct Gemini if selected
-        const isGeminiModel = selectedModel && selectedModel.startsWith('gemini-');
-        if (isGeminiModel) {
-          const geminiModel = selectedModel;
-          for (let attempt = 0; attempt < GEMINI_KEYS.length; attempt++) {
-            const apiKey = GEMINI_KEYS[attempt];
-            try {
-              sendProgress(75, `Submitting copywriter request directly to Gemini model: ${geminiModel} (key ${attempt})...`);
-              
-              const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  contents: [
-                    { role: 'user', parts: [{ text: systemPrompt + "\n\n" + userContent }] }
-                  ],
-                  generationConfig: {
-                    responseMimeType: 'application/json',
-                    temperature: 0.2
-                  }
-                }),
-                signal: AbortSignal.timeout(30000) // 30s timeout
-              });
+        // Helper: try a single Gemini key for text
+        const tryGeminiKey = async (geminiModel: string, apiKey: string): Promise<any> => {
+          const geminiRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ role: 'user', parts: [{ text: systemPrompt + "\n\n" + userContent }] }],
+                generationConfig: { responseMimeType: 'application/json', temperature: 0.2 }
+              }),
+              signal: AbortSignal.timeout(30000)
+            }
+          );
+          if (geminiRes.status !== 200) {
+            const errText = await geminiRes.text();
+            throw new Error(`Gemini returned ${geminiRes.status}: ${errText}`);
+          }
+          const geminiData = await geminiRes.json();
+          return geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        };
 
-              if (geminiRes.status === 200) {
-                const geminiData = await geminiRes.json();
-                const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-                console.log(`Success with direct Gemini model: ${geminiModel}`);
-                
-                const cleanJsonText = cleanJsonString(rawText);
-                try {
-                  const parsedData = JSON.parse(cleanJsonText);
-                  
-                  sendProgress(92, "Formatting response. Reconstructing full layout...");
-                  const originalParagraphs = articleContent
-                    .split('\n')
-                    .map((p: string) => p.trim())
-                    .filter((p: string) => p.length > 0);
+        // Helper: process raw AI text into responseData
+        const processRawText = (rawText: string, modelName: string): any => {
+          const cleanJsonText = cleanJsonString(rawText);
+          const parsedData = JSON.parse(cleanJsonText);
+          
+          const originalParagraphs = articleContent
+            .split('\n')
+            .map((p: string) => p.trim())
+            .filter((p: string) => p.length > 0);
 
-                  const formattedParagraphs = parsedData.formattedParagraphs || [];
-                  if (Array.isArray(formattedParagraphs)) {
-                    for (const item of formattedParagraphs) {
-                      if (item && typeof item.index === 'number' && item.index >= 0 && item.index < originalParagraphs.length) {
-                        originalParagraphs[item.index] = item.text;
-                      }
-                    }
-                  }
-                  parsedData.formattedArticleContent = originalParagraphs.join('\n\n');
-                  delete parsedData.formattedParagraphs;
-                  
-                  responseData = parsedData;
-                  successModel = geminiModel;
-                  break;
-                } catch (parseErr: any) {
-                  console.error(`JSON Parse failed for Gemini. Raw length: ${rawText.length}. Cleaned length: ${cleanJsonText.length}`);
-                  throw parseErr;
-                }
-              } else {
-                const errText = await geminiRes.text();
-                throw new Error(`Gemini API returned status ${geminiRes.status}: ${errText}`);
+          const formattedParagraphs = parsedData.formattedParagraphs || [];
+          if (Array.isArray(formattedParagraphs)) {
+            for (const item of formattedParagraphs) {
+              if (item && typeof item.index === 'number' && item.index >= 0 && item.index < originalParagraphs.length) {
+                originalParagraphs[item.index] = item.text;
               }
-            } catch (err: any) {
-              console.warn(`Direct Gemini model ${geminiModel} failed with key index ${attempt}:`, err.message || err);
-              lastError = err;
             }
           }
-        }
-
-        // If direct Gemini wasn't selected or failed, run the OpenCode client loop
-        if (!responseData) {
-          const modelsToTryFiltered = modelsToTry.filter(m => !m.startsWith('gemini-'));
+          parsedData.formattedArticleContent = originalParagraphs.join('\n\n');
+          delete parsedData.formattedParagraphs;
           
-          for (const model of modelsToTryFiltered) {
-            try {
-              sendProgress(75, `Submitting copywriter request to text model: ${model}...`);
-              
-              const response = await client.chat.completions.create({
-                model: model,
+          responseData = parsedData;
+          successModel = modelName;
+        };
+
+        // Helper: try Gemini text model with key rotation
+        const tryGeminiModels = async (modelNames: string[]) => {
+          for (const geminiModel of modelNames) {
+            if (responseData) break;
+            for (let attempt = 0; attempt < GEMINI_KEYS.length; attempt++) {
+              if (responseData) break;
+              const apiKey = GEMINI_KEYS[attempt];
+              try {
+                sendProgress(75, `Submitting copywriter request to ${geminiModel} (key ${attempt})...`);
+                const rawText = await tryGeminiKey(geminiModel, apiKey);
+                if (rawText) {
+                  console.log(`Success with Gemini model: ${geminiModel}`);
+                  processRawText(rawText, geminiModel);
+                  break;
+                }
+              } catch (err: any) {
+                console.warn(`Gemini ${geminiModel} key ${attempt}: ${err.message}`);
+                lastError = err;
+              }
+            }
+          }
+        };
+
+        // Helper: try an OpenCode model with timeout
+        const tryOpenCodeModel = async (modelName: string, timeoutMs: number = 15000) => {
+          if (responseData) return;
+          
+          const abortCtrl = new AbortController();
+          const timer = setTimeout(() => abortCtrl.abort(), timeoutMs);
+          
+          try {
+            sendProgress(75, `Submitting copywriter request to text model: ${modelName}...`);
+            
+            const response = await client.chat.completions.create(
+              {
+                model: modelName,
                 messages: [
                   { role: 'system', content: systemPrompt },
                   { role: 'user', content: userContent }
                 ],
                 response_format: { type: "json_object" },
                 temperature: 0.2,
-                max_tokens: 4000
-              });
+                max_tokens: 2000
+              },
+              { signal: abortCtrl.signal }
+            );
 
-              const rawText = response.choices[0]?.message?.content || '';
-              console.log(`Success with text model: ${model}`);
-              
-              // Robust cleanup and JSON parse
-              const cleanJsonText = cleanJsonString(rawText);
-              try {
-                const parsedData = JSON.parse(cleanJsonText);
-                
-                sendProgress(92, "Formatting response. Reconstructing full layout...");
-                // Reconstruct formattedArticleContent in the backend
-                const originalParagraphs = articleContent
-                  .split('\n')
-                  .map((p: string) => p.trim())
-                  .filter((p: string) => p.length > 0);
-
-                const formattedParagraphs = parsedData.formattedParagraphs || [];
-                if (Array.isArray(formattedParagraphs)) {
-                  for (const item of formattedParagraphs) {
-                    if (item && typeof item.index === 'number' && item.index >= 0 && item.index < originalParagraphs.length) {
-                      originalParagraphs[item.index] = item.text;
-                    }
-                  }
-                }
-                parsedData.formattedArticleContent = originalParagraphs.join('\n\n');
-                delete parsedData.formattedParagraphs; // clean up metadata
-                
-                responseData = parsedData;
-                successModel = model;
-                break;
-              } catch (parseErr: any) {
-                console.error(`JSON Parse failed for model ${model}. Raw text length: ${rawText.length}. Cleaned length: ${cleanJsonText.length}`);
-                throw parseErr;
-              }
-            } catch (err: any) {
-              console.error(`Text model ${model} failed:`, err.message || err);
-              lastError = err;
+            const rawText = response.choices?.[0]?.message?.content || '';
+            if (rawText) {
+              console.log(`Success with OpenCode model: ${modelName}`);
+              processRawText(rawText, modelName);
             }
+          } catch (err: any) {
+            const msg = err.name === 'AbortError' ? 'timeout' : err.message;
+            console.warn(`OpenCode model ${modelName} failed: ${msg}`);
+            lastError = err;
+          } finally {
+            clearTimeout(timer);
+          }
+        };
+
+        // ── Execute model chain ──
+
+        // 1. If user explicitly selected a Gemini model, try it first
+        if (selectedModel?.startsWith('gemini-')) {
+          await tryGeminiModels([selectedModel, 'gemini-2.5-flash']);
+        }
+
+        // 2. If user selected an OpenCode model, try it with 15s timeout
+        if (!responseData && selectedModel && !selectedModel.startsWith('gemini-')) {
+          await tryOpenCodeModel(selectedModel, 15000);
+        }
+
+        // 3. Always try Gemini as high-reliability fallback
+        if (!responseData) {
+          await tryGeminiModels(['gemini-2.5-flash', 'gemini-2.0-flash']);
+        }
+
+        // 4. Fall back to OpenCode models (fastest first) with 15s timeout each
+        if (!responseData) {
+          for (const model of ['deepseek-v4-flash', 'mimo-v2.5-free', 'big-pickle']) {
+            if (responseData) break;
+            await tryOpenCodeModel(model, 15000);
           }
         }
 
