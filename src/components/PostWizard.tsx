@@ -67,7 +67,7 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
     relatedKeywords: string;
     category: string;
     tags: string;
-    images: { originalName: string; localPath: string }[];
+    images: { originalName: string; localPath: string; wpMediaId?: number }[];
     model: string;
     customApiKey: string;
   }) => {
@@ -95,7 +95,8 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
         isFeatured: false,
         doNotUse: false,
         placement: `after paragraph ${i}`,
-        notes: ''
+        notes: '',
+        wpMediaId: img.wpMediaId
       }))
     };
     

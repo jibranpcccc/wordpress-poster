@@ -6,7 +6,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 export interface ImageDetail {
   id: string;
   originalName: string;
-  localPath: string; // public/uploads/...
+  localPath: string; // public/uploads/... or live WordPress URL
   seoFilename: string;
   altText: string;
   caption: string;
@@ -14,6 +14,7 @@ export interface ImageDetail {
   doNotUse: boolean;
   placement: string; // e.g. "after paragraph 3"
   notes: string;
+  wpMediaId?: number;
 }
 
 export interface SEOData {

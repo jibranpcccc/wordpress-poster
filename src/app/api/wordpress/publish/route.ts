@@ -87,6 +87,33 @@ export async function POST(request: Request) {
     // 3. Upload all active images to WP Media library
     for (const img of activeImages) {
       try {
+        if (img.wpMediaId) {
+          console.log(`[WP Media] Image "${img.originalName}" is pre-uploaded (WP ID: ${img.wpMediaId}). Updating SEO metadata...`);
+          // Update media detail with Alt Text, Caption, and Title in WP Media Library
+          const updateRes = await fetch(`${cleanWpUrl}/wp-json/wp/v2/media/${img.wpMediaId}`, {
+            method: 'POST',
+            headers: {
+              'Authorization': authHeader,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              alt_text: img.altText || '',
+              caption: img.caption || '',
+              title: img.seoFilename.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "),
+              description: img.notes || ''
+            })
+          });
+
+          if (!updateRes.ok) {
+            console.warn(`[WP Media Warning] Failed to update SEO meta for pre-uploaded media ID ${img.wpMediaId}: ${updateRes.statusText}`);
+          } else {
+            console.log(`[WP Media] SEO metadata updated successfully for pre-uploaded ID ${img.wpMediaId}`);
+          }
+
+          wpImageMap[img.id] = { id: img.wpMediaId, url: img.localPath };
+          continue;
+        }
+
         let fileBuffer: Buffer | null = null;
         let ext = 'jpg';
 

@@ -9,7 +9,7 @@ interface NewPostFormProps {
     relatedKeywords: string;
     category: string;
     tags: string;
-    images: { originalName: string; localPath: string }[];
+    images: { originalName: string; localPath: string; wpMediaId?: number }[];
     model: string;
     customApiKey: string;
   }) => void;
@@ -40,7 +40,7 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
     }
   };
   
-  const [uploadedImages, setUploadedImages] = useState<{ originalName: string; localPath: string; size: number }[]>([]);
+  const [uploadedImages, setUploadedImages] = useState<{ originalName: string; localPath: string; size: number; wpMediaId?: number }[]>([]);
   const [isUploadingImages, setIsUploadingImages] = useState(false);
   const [isUploadingArticle, setIsUploadingArticle] = useState(false);
   
@@ -96,6 +96,28 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
     }
     formData.append('isTextFile', 'false');
 
+    // Retrieve active WordPress credentials from localStorage
+    const wpUrl = localStorage.getItem('wp_active_site_url') || localStorage.getItem('wp_site_url') || '';
+    const storedSitesJson = localStorage.getItem('wp_saved_sites');
+    let wpUser = '';
+    let wpPassword = '';
+    if (storedSitesJson && wpUrl) {
+      try {
+        const sites = JSON.parse(storedSitesJson);
+        const site = sites.find((s: any) => s.siteUrl === wpUrl);
+        if (site) {
+          wpUser = site.username;
+          wpPassword = site.password;
+        }
+      } catch (e) {}
+    }
+
+    if (wpUrl && wpUser && wpPassword) {
+      formData.append('wpUrl', wpUrl);
+      formData.append('wpUser', wpUser);
+      formData.append('wpPassword', wpPassword);
+    }
+
     try {
       const res = await fetch('/api/upload', {
         method: 'POST',
@@ -133,7 +155,7 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
       relatedKeywords,
       category,
       tags,
-      images: uploadedImages.map(img => ({ originalName: img.originalName, localPath: img.localPath })),
+      images: uploadedImages.map(img => ({ originalName: img.originalName, localPath: img.localPath, wpMediaId: img.wpMediaId })),
       model,
       customApiKey
     });
