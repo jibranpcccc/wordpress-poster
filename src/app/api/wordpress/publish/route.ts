@@ -70,7 +70,7 @@ export async function POST(request: Request) {
     }
 
     // 1. Load project details from db
-    const project = db.getProject(projectId);
+    const project = await db.getProject(projectId);
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }

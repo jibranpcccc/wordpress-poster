@@ -7,14 +7,14 @@ export async function GET(request: Request) {
     const id = searchParams.get('id');
 
     if (id) {
-      const project = db.getProject(id);
+      const project = await db.getProject(id);
       if (!project) {
         return NextResponse.json({ error: 'Project not found' }, { status: 404 });
       }
       return NextResponse.json(project);
     }
 
-    const projects = db.getProjects();
+    const projects = await db.getProjects();
     return NextResponse.json(projects);
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Failed to get projects' }, { status: 500 });
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing project ID' }, { status: 400 });
     }
 
-    db.saveProject(project);
+    await db.saveProject(project);
     return NextResponse.json({ success: true, project });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Failed to save project' }, { status: 500 });
@@ -44,7 +44,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'Missing project ID' }, { status: 400 });
     }
 
-    const deleted = db.deleteProject(id);
+    const deleted = await db.deleteProject(id);
     if (!deleted) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }

@@ -1,5 +1,7 @@
 import fs from 'fs';
 import path from 'path';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
 
 export interface ImageDetail {
   id: string;
@@ -49,15 +51,77 @@ export interface Project {
 
 const DATA_DIR = path.join(process.cwd(), 'src', 'data', 'projects');
 
-// Ensure projects directory exists
+// Ensure local projects directory exists (fallback)
 function ensureDir() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
 }
 
+// Initialize Firebase Admin if environment variables are provided
+let firestoreDb: any = null;
+let isFirebaseInitialized = false;
+
+function getFirebaseDb() {
+  if (isFirebaseInitialized) return firestoreDb;
+
+  const hasServiceAccount = !!process.env.FIREBASE_SERVICE_ACCOUNT;
+  const hasIndividualKeys = !!(process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL);
+
+  if (hasServiceAccount || hasIndividualKeys) {
+    try {
+      if (getApps().length === 0) {
+        let credential;
+        if (hasServiceAccount) {
+          console.log("[DB] Initializing Firebase Admin with FIREBASE_SERVICE_ACCOUNT JSON...");
+          const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT!);
+          credential = cert(serviceAccount);
+        } else {
+          console.log("[DB] Initializing Firebase Admin with individual environment variables...");
+          credential = cert({
+            projectId: process.env.FIREBASE_PROJECT_ID,
+            clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+            privateKey: process.env.FIREBASE_PRIVATE_KEY!.replace(/\\n/g, '\n'),
+          });
+        }
+
+        initializeApp({
+          credential,
+        });
+      }
+      firestoreDb = getFirestore();
+      isFirebaseInitialized = true;
+      console.log("[DB] Firebase Firestore initialized successfully.");
+      return firestoreDb;
+    } catch (e) {
+      console.error("[DB] Failed to initialize Firebase Admin:", e);
+    }
+  } else {
+    console.log("[DB] Firebase credentials not found. Falling back to flat-file JSON database.");
+  }
+  return null;
+}
+
 export const db = {
-  getProjects: (): Project[] => {
+  getProjects: async (): Promise<Project[]> => {
+    const fDb = getFirebaseDb();
+    if (fDb) {
+      try {
+        console.log("[DB] Fetching projects from Firestore...");
+        const snapshot = await fDb.collection('projects').get();
+        const projects: Project[] = [];
+        snapshot.forEach((doc: any) => {
+          projects.push(doc.data() as Project);
+        });
+        // Sort by creation date descending
+        return projects.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      } catch (e) {
+        console.error("[DB] Failed to fetch projects from Firestore:", e);
+        // Fallback to local files if firestore fetch fails
+      }
+    }
+
+    // Fallback to flat files
     ensureDir();
     try {
       const files = fs.readdirSync(DATA_DIR);
@@ -72,15 +136,29 @@ export const db = {
           }
         }
       }
-      // Sort by creation date descending
       return projects.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     } catch (e) {
-      console.error("Failed to read projects:", e);
+      console.error("Failed to read local projects:", e);
       return [];
     }
   },
 
-  getProject: (id: string): Project | null => {
+  getProject: async (id: string): Promise<Project | null> => {
+    const fDb = getFirebaseDb();
+    if (fDb) {
+      try {
+        console.log(`[DB] Fetching project ${id} from Firestore...`);
+        const doc = await fDb.collection('projects').doc(id).get();
+        if (doc.exists) {
+          return doc.data() as Project;
+        }
+        console.log(`[DB] Project ${id} not found in Firestore.`);
+      } catch (e) {
+        console.error(`[DB] Failed to fetch project ${id} from Firestore:`, e);
+      }
+    }
+
+    // Fallback to flat files
     ensureDir();
     const filePath = path.join(DATA_DIR, `${id}.json`);
     if (!fs.existsSync(filePath)) return null;
@@ -93,23 +171,51 @@ export const db = {
     }
   },
 
-  saveProject: (project: Project): void => {
+  saveProject: async (project: Project): Promise<void> => {
+    const fDb = getFirebaseDb();
+    if (fDb) {
+      try {
+        console.log(`[DB] Saving project ${project.id} to Firestore...`);
+        await fDb.collection('projects').doc(project.id).set(project, { merge: true });
+        console.log(`[DB] Project ${project.id} saved to Firestore.`);
+        return;
+      } catch (e) {
+        console.error(`[DB] Failed to save project ${project.id} to Firestore:`, e);
+      }
+    }
+
+    // Fallback to flat files
     ensureDir();
     const filePath = path.join(DATA_DIR, `${project.id}.json`);
     try {
       fs.writeFileSync(filePath, JSON.stringify(project, null, 2), 'utf8');
+      console.log(`[DB] Project ${project.id} saved to local flat-file.`);
     } catch (e) {
       console.error(`Failed to save project ${project.id}:`, e);
       throw e;
     }
   },
 
-  deleteProject: (id: string): boolean => {
+  deleteProject: async (id: string): Promise<boolean> => {
+    const fDb = getFirebaseDb();
+    if (fDb) {
+      try {
+        console.log(`[DB] Deleting project ${id} from Firestore...`);
+        await fDb.collection('projects').doc(id).delete();
+        console.log(`[DB] Project ${id} deleted from Firestore.`);
+        return true;
+      } catch (e) {
+        console.error(`[DB] Failed to delete project ${id} from Firestore:`, e);
+      }
+    }
+
+    // Fallback to flat files
     ensureDir();
     const filePath = path.join(DATA_DIR, `${id}.json`);
     if (!fs.existsSync(filePath)) return false;
     try {
       fs.unlinkSync(filePath);
+      console.log(`[DB] Project ${id} deleted from local flat-file.`);
       return true;
     } catch (e) {
       console.error(`Failed to delete project ${id}:`, e);
