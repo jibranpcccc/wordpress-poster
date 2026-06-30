@@ -7,6 +7,7 @@ import { db } from '@/lib/db';
 const GEMINI_KEYS = [
   "AIzaSyCiQ-DLrhWSPrY1mZ0nBaZ0QJbb2E4Unlc",
   "AIzaSyD-suIQxkXxQTWr09_8g2KGZzTpuXlxShw",
+  "AIzaSyAZiu5eAQTJaTJ7KB82wKbjQ6ZDACggz_g",
   "AIzaSyD0SNf-kWaosjkhj5_tvlk80FkAQi5TXtQ",
   "AIzaSyAN-SxLvrjM0YDOpRWUtUg3ye5_ysBtNyo"
 ];
@@ -243,7 +244,26 @@ export async function POST(request: Request) {
               }
             }
 
-            // Fallback to local file if not loaded from Firestore
+            // Check if it's a remote URL (WordPress media URL)
+            if (!base64Data && (img.localPath.startsWith('http://') || img.localPath.startsWith('https://'))) {
+              try {
+                console.log(`[Analyze] Fetching remote image from: ${img.localPath}`);
+                const imgRes = await fetch(img.localPath, { signal: AbortSignal.timeout(6000) });
+                if (imgRes.ok) {
+                  const imgArrayBuffer = await imgRes.arrayBuffer();
+                  base64Data = Buffer.from(imgArrayBuffer).toString('base64');
+                  const pathname = new URL(img.localPath).pathname;
+                  ext = path.extname(pathname).replace('.', '').toLowerCase() || 'jpg';
+                  console.log(`[Analyze] Loaded remote image "${img.originalName}" successfully.`);
+                } else {
+                  console.warn(`Failed to fetch remote image at ${img.localPath}: ${imgRes.statusText}`);
+                }
+              } catch (fetchErr: any) {
+                console.warn(`Exception fetching remote image at ${img.localPath}: ${fetchErr.message}`);
+              }
+            }
+
+            // Fallback to local file if not loaded from Firestore/Remote
             if (!base64Data) {
               const fullPath = path.join(uploadDir, img.localPath);
               if (fs.existsSync(fullPath)) {
@@ -432,57 +452,130 @@ ${preAnalyzedImagesText}`;
         let successModel = '';
         let lastError: any = null;
 
-        for (const model of modelsToTry) {
-          try {
-            sendProgress(75, `Submitting copywriter request to text model: ${model}...`);
-            
-            const response = await client.chat.completions.create({
-              model: model,
-              messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: userContent }
-              ],
-              response_format: { type: "json_object" },
-              temperature: 0.2,
-              max_tokens: 4000
-            });
-
-            const rawText = response.choices[0]?.message?.content || '';
-            console.log(`Success with text model: ${model}`);
-            
-            // Robust cleanup and JSON parse
-            const cleanJsonText = cleanJsonString(rawText);
+        // Try direct Gemini if selected
+        const isGeminiModel = selectedModel && selectedModel.startsWith('gemini-');
+        if (isGeminiModel) {
+          const geminiModel = selectedModel;
+          for (let attempt = 0; attempt < GEMINI_KEYS.length; attempt++) {
+            const apiKey = GEMINI_KEYS[attempt];
             try {
-              const parsedData = JSON.parse(cleanJsonText);
+              sendProgress(75, `Submitting copywriter request directly to Gemini model: ${geminiModel} (key ${attempt})...`);
               
-              sendProgress(92, "Formatting response. Reconstructing full layout...");
-              // Reconstruct formattedArticleContent in the backend
-              const originalParagraphs = articleContent
-                .split('\n')
-                .map((p: string) => p.trim())
-                .filter((p: string) => p.length > 0);
+              const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [
+                    { role: 'user', parts: [{ text: systemPrompt + "\n\n" + userContent }] }
+                  ],
+                  generationConfig: {
+                    responseMimeType: 'application/json',
+                    temperature: 0.2
+                  }
+                }),
+                signal: AbortSignal.timeout(30000) // 30s timeout
+              });
 
-              const formattedParagraphs = parsedData.formattedParagraphs || [];
-              if (Array.isArray(formattedParagraphs)) {
-                for (const item of formattedParagraphs) {
-                  if (item && typeof item.index === 'number' && item.index >= 0 && item.index < originalParagraphs.length) {
-                    originalParagraphs[item.index] = item.text;
+              if (geminiRes.status === 200) {
+                const geminiData = await geminiRes.json();
+                const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                console.log(`Success with direct Gemini model: ${geminiModel}`);
+                
+                const cleanJsonText = cleanJsonString(rawText);
+                try {
+                  const parsedData = JSON.parse(cleanJsonText);
+                  
+                  sendProgress(92, "Formatting response. Reconstructing full layout...");
+                  const originalParagraphs = articleContent
+                    .split('\n')
+                    .map((p: string) => p.trim())
+                    .filter((p: string) => p.length > 0);
+
+                  const formattedParagraphs = parsedData.formattedParagraphs || [];
+                  if (Array.isArray(formattedParagraphs)) {
+                    for (const item of formattedParagraphs) {
+                      if (item && typeof item.index === 'number' && item.index >= 0 && item.index < originalParagraphs.length) {
+                        originalParagraphs[item.index] = item.text;
+                      }
+                    }
+                  }
+                  parsedData.formattedArticleContent = originalParagraphs.join('\n\n');
+                  delete parsedData.formattedParagraphs;
+                  
+                  responseData = parsedData;
+                  successModel = geminiModel;
+                  break;
+                } catch (parseErr: any) {
+                  console.error(`JSON Parse failed for Gemini. Raw length: ${rawText.length}. Cleaned length: ${cleanJsonText.length}`);
+                  throw parseErr;
+                }
+              } else {
+                const errText = await geminiRes.text();
+                throw new Error(`Gemini API returned status ${geminiRes.status}: ${errText}`);
+              }
+            } catch (err: any) {
+              console.warn(`Direct Gemini model ${geminiModel} failed with key index ${attempt}:`, err.message || err);
+              lastError = err;
+            }
+          }
+        }
+
+        // If direct Gemini wasn't selected or failed, run the OpenCode client loop
+        if (!responseData) {
+          const modelsToTryFiltered = modelsToTry.filter(m => !m.startsWith('gemini-'));
+          
+          for (const model of modelsToTryFiltered) {
+            try {
+              sendProgress(75, `Submitting copywriter request to text model: ${model}...`);
+              
+              const response = await client.chat.completions.create({
+                model: model,
+                messages: [
+                  { role: 'system', content: systemPrompt },
+                  { role: 'user', content: userContent }
+                ],
+                response_format: { type: "json_object" },
+                temperature: 0.2,
+                max_tokens: 4000
+              });
+
+              const rawText = response.choices[0]?.message?.content || '';
+              console.log(`Success with text model: ${model}`);
+              
+              // Robust cleanup and JSON parse
+              const cleanJsonText = cleanJsonString(rawText);
+              try {
+                const parsedData = JSON.parse(cleanJsonText);
+                
+                sendProgress(92, "Formatting response. Reconstructing full layout...");
+                // Reconstruct formattedArticleContent in the backend
+                const originalParagraphs = articleContent
+                  .split('\n')
+                  .map((p: string) => p.trim())
+                  .filter((p: string) => p.length > 0);
+
+                const formattedParagraphs = parsedData.formattedParagraphs || [];
+                if (Array.isArray(formattedParagraphs)) {
+                  for (const item of formattedParagraphs) {
+                    if (item && typeof item.index === 'number' && item.index >= 0 && item.index < originalParagraphs.length) {
+                      originalParagraphs[item.index] = item.text;
+                    }
                   }
                 }
+                parsedData.formattedArticleContent = originalParagraphs.join('\n\n');
+                delete parsedData.formattedParagraphs; // clean up metadata
+                
+                responseData = parsedData;
+                successModel = model;
+                break;
+              } catch (parseErr: any) {
+                console.error(`JSON Parse failed for model ${model}. Raw text length: ${rawText.length}. Cleaned length: ${cleanJsonText.length}`);
+                throw parseErr;
               }
-              parsedData.formattedArticleContent = originalParagraphs.join('\n\n');
-              delete parsedData.formattedParagraphs; // clean up metadata
-              
-              responseData = parsedData;
-              successModel = model;
-              break;
-            } catch (parseErr: any) {
-              console.error(`JSON Parse failed for model ${model}. Raw text length: ${rawText.length}. Cleaned length: ${cleanJsonText.length}`);
-              throw parseErr;
+            } catch (err: any) {
+              console.error(`Text model ${model} failed:`, err.message || err);
+              lastError = err;
             }
-          } catch (err: any) {
-            console.error(`Text model ${model} failed:`, err.message || err);
-            lastError = err;
           }
         }
 
