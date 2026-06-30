@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f8fafc; /* Soft Slate background */
+  --foreground: #0f172a; /* Dark Slate text */
+  --card-bg: #ffffff;
+  --card-border: #e2e8f0;
+  
+  --primary: #3b82f6; /* Modern Blue */
+  --primary-hover: #2563eb;
+  
+  --success: #10b981; /* Fresh Green */
+  --success-hover: #059669;
+  
+  --muted: #64748b;
+  --border: #e2e8f0;
+}
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-success: var(--success);
+  --color-success-hover: var(--success-hover);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-card-bg: var(--card-bg);
+  --color-card-border: var(--card-border);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  overflow-y: scroll;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Gutenberg-style Preview Styles */
+.wp-preview-content h2 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+  color: #1e293b;
+}
+
+.wp-preview-content h3 {
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  color: #334155;
+}
+
+.wp-preview-content p {
+  font-size: 1.05rem;
+  line-height: 1.75;
+  margin-bottom: 1.25rem;
+  color: #475569;
+}
+
+.wp-preview-content img {
+  border-radius: 8px;
+  margin: 1.5rem 0;
+  max-width: 100%;
+  height: auto;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+}
+
+.wp-preview-content .wp-caption {
+  text-align: center;
+  background: #f8fafc;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  margin-bottom: 1.5rem;
+}
+
+.wp-preview-content .wp-caption-text {
+  font-size: 0.875rem;
+  color: #64748b;
+  margin-top: 4px;
+}
