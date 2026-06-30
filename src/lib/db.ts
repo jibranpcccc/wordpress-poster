@@ -238,6 +238,7 @@ export const db = {
         return;
       } catch (e) {
         console.error(`[DB] Failed to save image asset ${id} to Firestore:`, e);
+        throw e;
       }
     }
   },

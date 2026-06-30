@@ -106,11 +106,21 @@ export async function POST(request: Request) {
 
         // Fallback to local files
         if (!fileBuffer) {
-          const fullPath = path.join(uploadDir, img.localPath);
+          let checkPath = img.localPath;
+          if (checkPath.includes('?id=')) {
+            try {
+              const urlObj = new URL(checkPath, 'http://localhost');
+              const imageId = urlObj.searchParams.get('id');
+              if (imageId) {
+                checkPath = `/uploads/${imageId}`;
+              }
+            } catch (e) {}
+          }
+          const fullPath = path.join(uploadDir, checkPath);
           if (fs.existsSync(fullPath)) {
             fileBuffer = fs.readFileSync(fullPath);
-            ext = path.extname(img.localPath).replace('.', '').toLowerCase();
-            console.log(`[WP Media] Loaded image "${img.originalName}" from local filesystem.`);
+            ext = path.extname(checkPath).replace('.', '').toLowerCase();
+            console.log(`[WP Media] Loaded image "${img.originalName}" from local filesystem fallback.`);
           } else {
             console.warn(`Image file not found locally or in Firestore at: ${img.localPath}`);
           }
