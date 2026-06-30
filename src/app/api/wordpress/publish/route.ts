@@ -143,7 +143,7 @@ export async function POST(request: Request) {
               }
             } catch (e) {}
           }
-          const fullPath = path.join(uploadDir, checkPath);
+          const fullPath = path.join(uploadDir, checkPath.replace(/^\//, ''));
           if (fs.existsSync(fullPath)) {
             fileBuffer = fs.readFileSync(fullPath);
             ext = path.extname(checkPath).replace('.', '').toLowerCase();

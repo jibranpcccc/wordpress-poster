@@ -134,6 +134,10 @@ export default function WordPressConnect({ selectedCategoryIds, onSelectCategori
         localStorage.setItem('wp_saved_sites', JSON.stringify(updatedSites));
         localStorage.setItem('wp_active_site_url', url);
         localStorage.setItem('wp_active_username', user);
+        // Also save to legacy keys for OutputViewer compatibility
+        localStorage.setItem('wp_site_url', url);
+        localStorage.setItem('wp_username', user);
+        localStorage.setItem('wp_password', pass);
         
         const newIdx = forcedIndex !== undefined ? forcedIndex : updatedSites.findIndex(s => s.siteUrl === url && s.username === user);
         setSelectedSiteIndex(newIdx !== -1 ? newIdx : 0);
