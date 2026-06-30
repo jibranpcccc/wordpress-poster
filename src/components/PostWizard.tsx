@@ -70,6 +70,7 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
     images: { originalName: string; localPath: string; wpMediaId?: number }[];
     model: string;
     customApiKey: string;
+    customGeminiKey: string;
   }) => {
     setIsAnalyzing(true);
     setAnalysisProgress(0);
@@ -115,6 +116,7 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
           relatedKeywords: data.relatedKeywords,
           images: draftProject.images,
           customApiKey: data.customApiKey,
+          customGeminiKey: data.customGeminiKey,
           model: data.model,
           wpUrl: localStorage.getItem('wp_active_site_url') || localStorage.getItem('wp_site_url') || ''
         })

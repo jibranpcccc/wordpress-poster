@@ -12,6 +12,7 @@ interface NewPostFormProps {
     images: { originalName: string; localPath: string; wpMediaId?: number }[];
     model: string;
     customApiKey: string;
+    customGeminiKey: string;
   }) => void;
   isAnalyzing: boolean;
 }
@@ -30,13 +31,24 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
     }
     return '';
   });
-
-
+  const [customGeminiKey, setCustomGeminiKey] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('gemini_api_key') || '';
+    }
+    return '';
+  });
 
   const handleApiKeyChange = (val: string) => {
     setCustomApiKey(val);
     if (typeof window !== 'undefined') {
       localStorage.setItem('opencode_zen_api_key', val);
+    }
+  };
+
+  const handleGeminiKeyChange = (val: string) => {
+    setCustomGeminiKey(val);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('gemini_api_key', val);
     }
   };
   
@@ -157,7 +169,8 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
       tags,
       images: uploadedImages.map(img => ({ originalName: img.originalName, localPath: img.localPath, wpMediaId: img.wpMediaId })),
       model,
-      customApiKey
+      customApiKey,
+      customGeminiKey
     });
   };
 
@@ -375,6 +388,20 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
             />
             <p className="text-[10px] text-muted mt-1.5">
               Saved locally in your browser. Leave blank if your local server already has the key configured in `.env` or system variables.
+            </p>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">Gemini API Key (Optional)</label>
+            <input
+              type="password"
+              value={customGeminiKey}
+              onChange={(e) => handleGeminiKeyChange(e.target.value)}
+              placeholder="Leave blank to use server .env key"
+              className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-slate-50/30"
+            />
+            <p className="text-[10px] text-muted mt-1.5">
+              Used for visual analysis & direct copywriting. Get a free key in 10 seconds at <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:underline font-medium">Google AI Studio</a>.
             </p>
           </div>
         </div>

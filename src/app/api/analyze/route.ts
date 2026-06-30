@@ -302,7 +302,7 @@ export async function POST(request: Request) {
         sendProgress(15, `Starting visual analysis of ${imagesWithBase64.length} images...`);
         let completedImages = 0;
         const visionPromises = imagesWithBase64.map(async (img, idx) => {
-          const res = await analyzeImageWithGemini(img, idx);
+          const res = await analyzeImageWithGemini(img, idx, customGeminiKey || null, envGeminiKey);
           completedImages++;
           const pct = 15 + Math.round((completedImages / imagesWithBase64.length) * 45); // scales 15% to 60%
           sendProgress(pct, `Analyzed image ${completedImages}/${imagesWithBase64.length}: "${img.originalName}"...`);
@@ -501,19 +501,28 @@ ${preAnalyzedImagesText}`;
         const tryGeminiModels = async (modelNames: string[]) => {
           for (const geminiModel of modelNames) {
             if (responseData) break;
-            for (let attempt = 0; attempt < GEMINI_KEYS.length; attempt++) {
+            
+            // Build list of keys to try
+            const textKeysToTry = [];
+            if (customGeminiKey) textKeysToTry.push({ key: customGeminiKey, label: 'User Custom Gemini Key' });
+            if (envGeminiKey) textKeysToTry.push({ key: envGeminiKey, label: 'Server Env Gemini Key' });
+            
+            GEMINI_KEYS.forEach((key, idx) => {
+              textKeysToTry.push({ key, label: `Rotated Key Index ${idx}` });
+            });
+
+            for (const item of textKeysToTry) {
               if (responseData) break;
-              const apiKey = GEMINI_KEYS[attempt];
               try {
-                sendProgress(75, `Submitting copywriter request to ${geminiModel} (key ${attempt})...`);
-                const rawText = await tryGeminiKey(geminiModel, apiKey);
+                sendProgress(75, `Submitting copywriter request directly to Gemini model: ${geminiModel} using ${item.label}...`);
+                const rawText = await tryGeminiKey(geminiModel, item.key);
                 if (rawText) {
-                  console.log(`Success with Gemini model: ${geminiModel}`);
+                  console.log(`Success with direct Gemini model: ${geminiModel} using ${item.label}`);
                   processRawText(rawText, geminiModel);
                   break;
                 }
               } catch (err: any) {
-                console.warn(`Gemini ${geminiModel} key ${attempt}: ${err.message}`);
+                console.warn(`Direct Gemini model ${geminiModel} failed with ${item.label}:`, err.message || err);
                 lastError = err;
               }
             }
