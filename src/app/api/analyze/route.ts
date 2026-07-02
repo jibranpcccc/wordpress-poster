@@ -418,6 +418,8 @@ Generate a highly optimized, short SEO filename (3-5 words, lowercase, hyphen-se
 The alt text MUST:
 - Be descriptive + contextual (80-140 characters ideal).
 - Describe the specific hair style/color details, placement, skin harmony, or technique shown in the image.
+- Focus 100% on describing the hair texture, hair color, highlighting placement, foiling pattern, regrowth line, tone, gloss, or styling.
+- Do NOT describe facial expressions, smiles, eyes, clothing (e.g., "green shirt", "hair tie"), or room/background details (e.g., "sitting on a bed", "in a bedroom").
 - Naturally integrate the focus keyword "${kw}" without keyword stuffing.
 - Be unique and professional.
 
@@ -645,7 +647,7 @@ async function analyzeImageWithGemini(
             {
               role: 'user',
               content: [
-                { type: 'text', text: 'Analyze this post image. The focus keyword of the post is: "' + (mainKeyword || 'hair style') + '". Suggest a short search-optimized SEO filename (3-5 words, lowercase, hyphen-separated, ending in original extension) and a search-optimized SEO alt tag. The alt tag MUST: 1. Be descriptive and contextual (80-140 characters ideal). 2. Describe style/color details, placement, skin harmony, or technique shown. 3. Naturally integrate the focus keyword without stuffing. Do NOT include stop words like "image", "woman", "photo", "the", "has", "of" in the filename. You MUST return a valid JSON object ONLY. Use exactly this format: {"seoFilename": "...", "altText": "...", "caption": "..."}' },
+                { type: 'text', text: 'Analyze this post image. The focus keyword of the post is: "' + (mainKeyword || 'hair style') + '". Suggest a short search-optimized SEO filename (3-5 words, lowercase, hyphen-separated, ending in original extension) and a search-optimized SEO alt tag. The alt tag MUST: 1. Be descriptive and contextual (80-140 characters ideal). 2. Describe style/color details, placement, skin harmony, or technique shown. 3. Focus 100% on describing the hair texture, hair color, highlighting placement, foiling pattern, regrowth line, tone, gloss, or styling. 4. Do NOT describe facial expressions, smiles, eyes, clothing, or room/background details. 5. Naturally integrate the focus keyword without stuffing. Do NOT include stop words like "image", "woman", "photo", "the", "has", "of" in the filename. You MUST return a valid JSON object ONLY. Use exactly this format: {"seoFilename": "...", "altText": "...", "caption": "..."}' },
                 {
                   type: 'image_url',
                   image_url: {
@@ -971,8 +973,14 @@ Image Matching Rules:
 Each image matched MUST include:
 - "id": The image ID
 - "originalName": The original filename
-- "seoFilename": A highly optimized SEO filename (3-5 words, lowercase, hyphen-separated, ending in .jpg). Do NOT include stop words like "image", "woman", "photo", "the", "has", "of".
-- "altText": A search-optimized alt tag (80-140 characters). Must be highly descriptive, contextual, and unique. Naturally integrate the focus keyword or related keywords matching the surrounding paragraph context without keyword stuffing.
+- "seoFilename": A highly optimized, customized SEO filename (3-5 words, lowercase, hyphen-separated, ending in .jpg). It MUST integrate the focusKeyword or related keywords based on the matched section's topic (e.g., fine-hair-foiling-placement-regrowth-line.jpg, curly-hair-color-placement-dimension.jpg). Do NOT use generic names or stop words.
+- "altText": A search-optimized alt tag (80-140 characters). It MUST NOT describe clothing, faces, smiles, or room backgrounds. It MUST focus entirely on the hair style, coloring technique, color placement, regrowth, tone, or gray-blending, tying it directly to the surrounding section topic.
+  Here are perfect examples you must follow for alt text style:
+  * "Fine color-treated hair with soft face-framing placement for a lighter regrowth line."
+  * "Curly hair showing dimensional color placement for texture and movement."
+  * "Short black hair example for natural-light tone checking and clean color finish."
+  * "Braided highlighted hair showing warm brunette dimension and blended color placement."
+  * "Short layered hair with soft gray-blending and gloss refresh inspiration."
 - "caption": A concise caption (under 60 characters).
 - Accurate "placementParagraphIndex"
 - Matching "placementHeading" (must exist in article)
