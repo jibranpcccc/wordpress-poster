@@ -413,19 +413,60 @@ async function analyzeImageWithCloudflare(
   const imageArray = Array.from(buffer);
 
   const kw = mainKeyword || "Hair Style";
-  const prompt = `Analyze this hair style image. The focus keyword is "${kw}".
-Generate a highly optimized, short SEO filename (3-5 words, lowercase, hyphen-separated, ending in .jpg) and a search-optimized SEO alt tag.
-The alt text MUST:
-- Be descriptive + contextual (80-140 characters ideal).
-- Describe the specific hair style/color details, placement, skin harmony, or technique shown in the image.
-- Focus 100% on describing the hair texture, hair color, highlighting placement, foiling pattern, regrowth line, tone, gloss, or styling.
-- Do NOT describe facial expressions, smiles, eyes, clothing (e.g., "green shirt", "hair tie"), or room/background details (e.g., "sitting on a bed", "in a bedroom").
-- Naturally integrate the focus keyword "${kw}" without keyword stuffing.
-- Be unique and professional.
+  const prompt = `Analyze this hairstyle image for image SEO.
 
-Do NOT include stop words like "image", "woman", "photo", "the", "has", "of" in the filename.
+Focus keyword: "${kw}"
+
+Your job is to generate:
+
+One short SEO filename.
+One search-optimized SEO alt text.
+
+IMPORTANT IMAGE ANALYSIS RULES:
+
+Focus only on the hair.
+Analyze hair length, texture, color, highlights, lowlights, foiling placement, toner, gloss, regrowth line, gray blending, curls, layers, braids, or styling technique.
+Ignore face, smile, eyes, pose, clothing, accessories, room, furniture, wall, background, lighting objects, and camera setting.
+Do not describe the person as a woman, girl, model, client, or subject.
+Do not mention clothing colors, bedroom, bed, chair, mirror, shirt, sweater, earrings, smile, face, or eyes.
+
+FILENAME RULES:
+
+3-5 words only.
+lowercase.
+hyphen-separated.
+must end in .jpg.
+must describe the hairstyle/color/technique.
+avoid generic names like hair-style, long-hair-style, short-hair-style, hairstyle-woman.
+do not use stop words like image, woman, photo, the, has, of, with.
+naturally include a keyword related to "${kw}" only if it fits the visible hair.
+
+ALT TEXT RULES:
+
+80-140 characters ideal.
+Must describe the visible hair and its SEO context.
+Must focus on hair texture, color placement, highlighting, foiling, regrowth, toner, gloss, cut, or styling.
+Naturally integrate "${kw}" or a closely related phrase only if it fits the image.
+Do not keyword stuff.
+Do not mention clothing, face, smile, eyes, room, background, or pose.
+Must be unique, professional, and useful for Google Images.
+
+BAD ALT TEXT EXAMPLES:
+
+A woman with long hair wearing a blue shirt.
+A smiling woman with braided hair.
+A woman sitting on a bed with short hair.
+Hair style woman.
+
+GOOD ALT TEXT EXAMPLES:
+
+Fine color-treated hair with soft face-framing placement for a lighter regrowth line.
+Curly hair showing dimensional color placement for texture and movement.
+Short black hair with clean tone balance for natural-light color checking.
+Braided highlighted hair showing warm brunette dimension and blended color placement.
 
 You MUST respond exactly in this format:
+
 Filename: [seo-filename].jpg
 Alt Text: [SEO alt text]`;
 
@@ -647,7 +688,7 @@ async function analyzeImageWithGemini(
             {
               role: 'user',
               content: [
-                { type: 'text', text: 'Analyze this post image. The focus keyword of the post is: "' + (mainKeyword || 'hair style') + '". Suggest a short search-optimized SEO filename (3-5 words, lowercase, hyphen-separated, ending in original extension) and a search-optimized SEO alt tag. The alt tag MUST: 1. Be descriptive and contextual (80-140 characters ideal). 2. Describe style/color details, placement, skin harmony, or technique shown. 3. Focus 100% on describing the hair texture, hair color, highlighting placement, foiling pattern, regrowth line, tone, gloss, or styling. 4. Do NOT describe facial expressions, smiles, eyes, clothing, or room/background details. 5. Naturally integrate the focus keyword without stuffing. Do NOT include stop words like "image", "woman", "photo", "the", "has", "of" in the filename. You MUST return a valid JSON object ONLY. Use exactly this format: {"seoFilename": "...", "altText": "...", "caption": "..."}' },
+                { type: 'text', text: 'Analyze this hairstyle image for image SEO. Focus keyword: "' + (mainKeyword || 'hair style') + '". Your job is to generate one short SEO filename and one search-optimized SEO alt text. IMPORTANT IMAGE ANALYSIS RULES: Focus only on the hair. Analyze hair length, texture, color, highlights, lowlights, foiling placement, toner, gloss, regrowth line, gray blending, curls, layers, braids, or styling technique. Ignore face, smile, eyes, pose, clothing, accessories, room, furniture, wall, background, lighting objects, and camera setting. Do not describe the person as a woman, girl, model, client, or subject. Do not mention clothing colors, bedroom, bed, chair, mirror, shirt, sweater, earrings, smile, face, or eyes. FILENAME RULES: 3-5 words only, lowercase, hyphen-separated, must end in original extension, must describe the hairstyle/color/technique. Avoid generic names like hair-style, long-hair-style. Do not use stop words like image, woman, photo, the, has, of, with. Naturally include a keyword related to focus keyword only if it fits the visible hair. ALT TEXT RULES: 80-140 characters ideal. Must describe the visible hair and its SEO context. Focus on hair texture, color placement, highlighting, foiling, regrowth, toner, gloss, cut, or styling. Naturally integrate focus keyword only if it fits. Do not keyword stuff or mention clothing/face/smile/background. You MUST return a valid JSON object ONLY. Use exactly this format: {"seoFilename": "...", "altText": "...", "caption": "..."}' },
                 {
                   type: 'image_url',
                   image_url: {
@@ -965,28 +1006,70 @@ SEO Metadata Rules:
 - "pinterestTitle": engaging, keyword-focused.
 - "pinterestDescription": natural, slightly emotional, SEO-friendly.
 
-Image Matching Rules:
-- Use the provided pre-analyzed image data.
-- Match images to the most relevant paragraph or section.
-- Do NOT guess or force placements.
+Image Matching and SEO Rules:
 
-Each image matched MUST include:
-- "id": The image ID
-- "originalName": The original filename
-- "seoFilename": A highly optimized, customized SEO filename (3-5 words, lowercase, hyphen-separated, ending in .jpg). It MUST integrate the focusKeyword or related keywords based on the matched section's topic (e.g., fine-hair-foiling-placement-regrowth-line.jpg, curly-hair-color-placement-dimension.jpg). Do NOT use generic names or stop words.
-- "altText": A search-optimized alt tag (80-140 characters). It MUST NOT describe clothing, faces, smiles, or room backgrounds. It MUST focus entirely on the hair style, coloring technique, color placement, regrowth, tone, or gray-blending, tying it directly to the surrounding section topic.
-  Here are perfect examples you must follow for alt text style:
-  * "Fine color-treated hair with soft face-framing placement for a lighter regrowth line."
-  * "Curly hair showing dimensional color placement for texture and movement."
-  * "Short black hair example for natural-light tone checking and clean color finish."
-  * "Braided highlighted hair showing warm brunette dimension and blended color placement."
-  * "Short layered hair with soft gray-blending and gloss refresh inspiration."
-- "caption": A concise caption (under 60 characters).
-- Accurate "placementParagraphIndex"
-- Matching "placementHeading" (must exist in article)
-- Clear "notes" explaining relevance
-- "useImage" = false if not relevant
-- Fill "reasonNotUsed" only when false
+Use the provided pre-analyzed image data, article headings, paragraph content, and focusKeyword.
+
+GLOBAL RULES:
+* Use a maximum of 4 article images.
+* Only place an image when it clearly supports the surrounding section.
+* Do not guess, force, or place irrelevant images.
+* If an image does not match any section, set "useImage": false.
+* The final filename and alt text must be optimized using both the image analysis and the matched article section.
+* The copywriting model is the final authority for SEO filename, alt text, caption, and placement.
+
+EACH MATCHED IMAGE MUST INCLUDE:
+* "id": Unique image ID.
+* "originalName": Original filename.
+* "seoFilename": A highly optimized SEO filename, 3-5 words, lowercase, hyphen-separated, ending in .jpg.
+* "altText": A search-optimized alt tag, ideally 80-140 characters.
+* "caption": A concise caption under 60 characters.
+* "placementParagraphIndex": Accurate 0-based index of the paragraph it should follow.
+* "placementHeading": Exact matching heading text from the article.
+* "useImage": true or false.
+
+SEO FILENAME RULES:
+* Must describe the hair style, hair color, color placement, foiling technique, toner, gloss, regrowth line, gray blending, curls, braids, or cut.
+* Must integrate the focusKeyword or a closely related section keyword when natural.
+* Do not use generic filenames like hair-style-woman.jpg, long-hair-style.jpg, short-hair-style.jpg, hairstyle-photo.jpg.
+* Do not use words like woman, image, photo, the, has, of, with.
+* Keep filename specific to the matched section topic.
+
+ALT TEXT RULES:
+* Must focus entirely on the hair.
+* Must connect the image to the matched article section.
+* Must describe hair texture, hair color, foiling placement, color dimension, regrowth, tone, gloss, gray blending, cut, or styling technique.
+* Must not describe face, smile, eyes, clothing, accessories, room, bed, background, pose, or camera.
+* Must not repeat the same structure for every image.
+* Must be unique, natural, professional, and search-friendly.
+* Do not keyword stuff.
+
+CAPTION RULES:
+* Under 60 characters.
+* Must support the section topic.
+* Must not be generic.
+* Good examples:
+  - Soft regrowth blending
+  - Curly color placement
+  - Glossy tone refresh
+  - Warm brunette dimension
+  - Natural-light tone check
+
+PLACEMENT RULES:
+* Place images after paragraphs where the image directly supports the topic.
+* Match foiling images near foiling sections.
+* Match curly/textured hair images near texture or curl placement sections.
+* Match toner/gloss images near toner, gloss, or color refresh sections.
+* Match gray blending images near gray blending or demi-permanent color sections.
+* Match brunette/copper/warm tone images near color theory or warmth sections.
+* Do not place an image just because the article needs an image.
+
+GOOD ALT TEXT STYLE EXAMPLES:
+* Fine color-treated hair with soft face-framing placement for a lighter regrowth line.
+* Curly hair showing dimensional color placement for texture and movement.
+* Short black hair example for natural-light tone checking and clean color finish.
+* Braided highlighted hair showing warm brunette dimension and blended color placement.
+* Short layered hair with soft gray-blending and gloss refresh inspiration.
 
 JSON Formatting Rules (CRITICAL):
 - Output MUST be valid JSON only.
