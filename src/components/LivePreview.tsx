@@ -50,7 +50,32 @@ function parseBoldItalic(text: string, keyOffset: number): React.ReactNode[] {
 }
 
 export default function LivePreview({ articleContent, images, seoData, onUpdateSEO }: LivePreviewProps) {
-  const paragraphs = articleContent
+  const stripImagePlaceholders = (text: string): string => {
+    const lines = text.split('\n');
+    const filtered = lines.filter(line => {
+      const cleanLine = line.trim().replace(/^[\*\s_\x22\x27\u201C\u201D\[]+/, '').toLowerCase();
+      if (cleanLine.startsWith('image:') || cleanLine.startsWith('image]') || cleanLine.startsWith('[image:')) {
+        return false;
+      }
+      if (cleanLine.startsWith('alt text:') || cleanLine.startsWith('alt tag:') || cleanLine.startsWith('alttag:')) {
+        return false;
+      }
+      if (cleanLine.startsWith('caption:')) {
+        return false;
+      }
+      if (cleanLine.startsWith('filename:') || cleanLine.startsWith('seo filename:')) {
+        return false;
+      }
+      const trimmedRaw = line.trim();
+      if (trimmedRaw === '*' || trimmedRaw === '**' || trimmedRaw === '_' || trimmedRaw === '__') {
+        return false;
+      }
+      return true;
+    });
+    return filtered.join('\n');
+  };
+
+  const paragraphs = stripImagePlaceholders(articleContent)
     .split('\n')
     .map((p) => p.trim())
     .filter((p) => p.length > 0);

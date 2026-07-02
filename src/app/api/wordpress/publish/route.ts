@@ -231,13 +231,32 @@ export async function POST(request: Request) {
       wpFeaturedMediaId = wpImageMap[featuredImage.id].id;
     }
 
-    // 5. Generate final HTML content with live uploaded image URLs
-    let articleText = project.formattedContent || project.articleContent;
+    const stripImagePlaceholders = (text: string): string => {
+      const lines = text.split('\n');
+      const filtered = lines.filter(line => {
+        const cleanLine = line.trim().replace(/^[\*\s_\x22\x27\u201C\u201D\[]+/, '').toLowerCase();
+        if (cleanLine.startsWith('image:') || cleanLine.startsWith('image]') || cleanLine.startsWith('[image:')) {
+          return false;
+        }
+        if (cleanLine.startsWith('alt text:') || cleanLine.startsWith('alt tag:') || cleanLine.startsWith('alttag:')) {
+          return false;
+        }
+        if (cleanLine.startsWith('caption:')) {
+          return false;
+        }
+        if (cleanLine.startsWith('filename:') || cleanLine.startsWith('seo filename:')) {
+          return false;
+        }
+        const trimmedRaw = line.trim();
+        if (trimmedRaw === '*' || trimmedRaw === '**' || trimmedRaw === '_' || trimmedRaw === '__') {
+          return false;
+        }
+        return true;
+      });
+      return filtered.join('\n');
+    };
 
-    // First pass: Strip any [IMAGE: ...] + Alt text: "..." placeholders from the text
-    // (these exist in copy-paste output but may leak into formattedContent)
-    const imageRegex = /\[IMAGE:\s*(.*?)\](?:\s*[\r\n]+\s*Alt\s+text:\s*["\u201C\u201D]?([^"\u201C\u201D\r\n]*)["\u201C\u201D]?)?(?:\s*[\r\n]+\s*Caption:\s*["\u201C\u201D]?([^"\u201C\u201D\r\n]*)["\u201C\u201D]?)?/gi;
-    articleText = articleText.replace(imageRegex, '');
+    let articleText = stripImagePlaceholders(project.formattedContent || project.articleContent);
 
     const paragraphs = articleText
       .split('\n')
