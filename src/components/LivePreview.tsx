@@ -9,13 +9,41 @@ interface LivePreviewProps {
 }
 
 function parseMarkdownInline(text: string): React.ReactNode {
+  // First handle links, then bold/italic
+  const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+  const segments: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let linkMatch;
+
+  while ((linkMatch = linkRegex.exec(text)) !== null) {
+    // Process text before the link for bold/italic
+    if (linkMatch.index > lastIndex) {
+      segments.push(...parseBoldItalic(text.slice(lastIndex, linkMatch.index), lastIndex));
+    }
+    segments.push(
+      <a key={`link-${linkMatch.index}`} href={linkMatch[2]} className="text-primary underline hover:text-primary-hover" target="_blank" rel="noopener noreferrer">
+        {linkMatch[1]}
+      </a>
+    );
+    lastIndex = linkMatch.index + linkMatch[0].length;
+  }
+
+  // Process remaining text after last link
+  if (lastIndex < text.length) {
+    segments.push(...parseBoldItalic(text.slice(lastIndex), lastIndex));
+  }
+
+  return segments.length > 0 ? segments : parseBoldItalic(text, 0);
+}
+
+function parseBoldItalic(text: string, keyOffset: number): React.ReactNode[] {
   const parts = text.split(/(\*\*.*?\*\*|\*.*?\*)/g);
   return parts.map((part, index) => {
     if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={index} className="font-bold text-slate-900">{part.slice(2, -2)}</strong>;
+      return <strong key={`bi-${keyOffset}-${index}`} className="font-bold text-slate-900">{part.slice(2, -2)}</strong>;
     }
     if (part.startsWith('*') && part.endsWith('*')) {
-      return <em key={index} className="italic text-slate-700">{part.slice(1, -1)}</em>;
+      return <em key={`bi-${keyOffset}-${index}`} className="italic text-slate-700">{part.slice(1, -1)}</em>;
     }
     return part;
   });

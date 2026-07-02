@@ -234,37 +234,10 @@ export async function POST(request: Request) {
     // 5. Generate final HTML content with live uploaded image URLs
     let articleText = project.formattedContent || project.articleContent;
 
-    // Regex to match [IMAGE: filename] and optional Alt text: "..." on the next lines
-    const imageRegex = /\[IMAGE:\s*(.*?)\](?:\s*[\r\n]+\s*Alt\s+text:\s*["\u201C\u201D](.*?)["\u201C\u201D])?/gi;
-
-    articleText = articleText.replace(imageRegex, (match, filename, inlineAlt) => {
-      filename = filename.trim();
-      const altText = inlineAlt ? inlineAlt.trim() : '';
-
-      // Find the image in activeImages
-      const img = activeImages.find(i => 
-        i.seoFilename.toLowerCase() === filename.toLowerCase() || 
-        i.originalName.toLowerCase() === filename.toLowerCase() ||
-        i.seoFilename.replace(/[-_]/g, '').toLowerCase() === filename.replace(/[-_]/g, '').toLowerCase() ||
-        i.originalName.replace(/[-_]/g, '').toLowerCase() === filename.replace(/[-_]/g, '').toLowerCase()
-      );
-
-      if (img) {
-        if (altText) {
-          img.altText = altText; // Update local alt text with inline text
-        }
-        const wpMedia = wpImageMap[img.id];
-        const cleanTitle = img.seoFilename.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ");
-        if (wpMedia) {
-          return `<!-- wp:image {"id":${wpMedia.id},"sizeSlug":"large","linkDestination":"none"} -->\n<figure class="wp-block-image size-large"><img src="${wpMedia.url}" alt="${img.altText || ''}" class="wp-image-${wpMedia.id}" title="${cleanTitle}"/>${img.caption ? `<figcaption class="wp-element-caption">${img.caption}</figcaption>` : ''}</figure>\n<!-- /wp:image -->`;
-        } else {
-          return `<!-- wp:image -->\n<figure class="wp-block-image size-large"><img src="${img.localPath}" alt="${img.altText || ''}" title="${cleanTitle}"/>${img.caption ? `<figcaption class="wp-element-caption">${img.caption}</figcaption>` : ''}</figure>\n<!-- /wp:image -->`;
-        }
-      }
-
-      // Strip missing images
-      return '';
-    });
+    // First pass: Strip any [IMAGE: ...] + Alt text: "..." placeholders from the text
+    // (these exist in copy-paste output but may leak into formattedContent)
+    const imageRegex = /\[IMAGE:\s*(.*?)\](?:\s*[\r\n]+\s*Alt\s+text:\s*["\u201C\u201D]?([^"\u201C\u201D\r\n]*)["\u201C\u201D]?)?(?:\s*[\r\n]+\s*Caption:\s*["\u201C\u201D]?([^"\u201C\u201D\r\n]*)["\u201C\u201D]?)?/gi;
+    articleText = articleText.replace(imageRegex, '');
 
     const paragraphs = articleText
       .split('\n')
@@ -291,7 +264,7 @@ export async function POST(request: Request) {
     };
 
     let htmlContent = '';
-    paragraphs.forEach((p) => {
+    paragraphs.forEach((p, idx) => {
       const trimmedP = p.trim();
       
       // If it is already a Gutenberg block, append directly
@@ -306,6 +279,18 @@ export async function POST(request: Request) {
       } else {
         htmlContent += `<!-- wp:paragraph -->\n<p>${markdownToHtml(trimmedP)}</p>\n<!-- /wp:paragraph -->\n\n`;
       }
+
+      // Insert images placed "after paragraph {idx}" using placement field
+      const matchedImgs = activeImages.filter(img => img.placement === `after paragraph ${idx}`);
+      matchedImgs.forEach(img => {
+        const wpMedia = wpImageMap[img.id];
+        const cleanTitle = img.seoFilename.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ");
+        if (wpMedia) {
+          htmlContent += `<!-- wp:image {"id":${wpMedia.id},"sizeSlug":"large","linkDestination":"none"} -->\n<figure class="wp-block-image size-large"><img src="${wpMedia.url}" alt="${img.altText || ''}" class="wp-image-${wpMedia.id}" title="${cleanTitle}"/>${img.caption ? `<figcaption class="wp-element-caption">${img.caption}</figcaption>` : ''}</figure>\n<!-- /wp:image -->\n\n`;
+        } else {
+          htmlContent += `<!-- wp:image -->\n<figure class="wp-block-image size-large"><img src="${img.localPath}" alt="${img.altText || ''}" title="${cleanTitle}"/>${img.caption ? `<figcaption class="wp-element-caption">${img.caption}</figcaption>` : ''}</figure>\n<!-- /wp:image -->\n\n`;
+        }
+      });
     });
 
     // 5.5 Resolve tags to WordPress tag IDs
@@ -318,14 +303,19 @@ export async function POST(request: Request) {
     const postPayload: Record<string, any> = {
       title: project.seoData?.seoTitle || project.title,
       content: htmlContent,
+      excerpt: project.seoData?.metaDescription || '',
       status: status || 'draft',
       slug: project.seoData?.slug || '',
       categories: project.selectedCategoryIds || [],
       tags: tagIds,
       featured_media: wpFeaturedMediaId > 0 ? wpFeaturedMediaId : undefined,
       meta: {
+        _yoast_wpseo_title: project.seoData?.seoTitle || project.title,
         _yoast_wpseo_focuskw: project.seoData?.focusKeyword || '',
-        _yoast_wpseo_metadesc: project.seoData?.metaDescription || ''
+        _yoast_wpseo_metadesc: project.seoData?.metaDescription || '',
+        rank_math_title: project.seoData?.seoTitle || project.title,
+        rank_math_description: project.seoData?.metaDescription || '',
+        rank_math_focus_keyword: project.seoData?.focusKeyword || ''
       }
     };
 

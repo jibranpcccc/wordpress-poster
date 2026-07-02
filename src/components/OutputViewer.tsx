@@ -76,7 +76,7 @@ export default function OutputViewer({ project, onUpdateProject }: OutputViewerP
       // Check for image placement
       const matchedImgs = activeImages.filter(img => img.placement === `after paragraph ${idx}`);
       matchedImgs.forEach(img => {
-        output += `<!-- wp:image {"alt":"${img.altText}"} -->\n<figure className="wp-block-image"><img src="${img.localPath}" alt="${img.altText}" title="${img.seoFilename}"/>${img.caption ? `<figcaption className="wp-element-caption">${img.caption}</figcaption>` : ''}</figure>\n<!-- /wp:image -->\n\n`;
+        output += `<!-- wp:image {"alt":"${img.altText}"} -->\n<figure class="wp-block-image"><img src="${img.localPath}" alt="${img.altText}" title="${img.seoFilename}"/>${img.caption ? `<figcaption class="wp-element-caption">${img.caption}</figcaption>` : ''}</figure>\n<!-- /wp:image -->\n\n`;
       });
     });
     return output;
@@ -96,7 +96,7 @@ export default function OutputViewer({ project, onUpdateProject }: OutputViewerP
 
       const matchedImgs = activeImages.filter(img => img.placement === `after paragraph ${idx}`);
       matchedImgs.forEach(img => {
-        output += `<figure className="wp-caption">\n  <img src="${img.localPath}" alt="${img.altText}" title="${img.seoFilename}" />\n  ${img.caption ? `<figcaption className="wp-caption-text">${img.caption}</figcaption>` : ''}\n</figure>\n`;
+        output += `<figure class="wp-caption">\n  <img src="${img.localPath}" alt="${img.altText}" title="${img.seoFilename}" />\n  ${img.caption ? `<figcaption class="wp-caption-text">${img.caption}</figcaption>` : ''}\n</figure>\n`;
       });
     });
     return output;
