@@ -410,12 +410,12 @@ async function analyzeImageWithGemini(
           'Authorization': `Bearer ${openCodeKey}`
         },
         body: JSON.stringify({
-          model: 'mimo-v2.5-free',
+          model: 'claude-sonnet-5',
           messages: [
             {
               role: 'user',
               content: [
-                { type: 'text', text: 'Analyze this post image. Suggest a short SEO-friendly filename (lowercase, hyphen-separated, ending in original extension) and a descriptive SEO alt tag describing the hair color, haircut, or style. Return JSON like: {"seoFilename": "...", "altText": "...", "caption": "..."}' },
+                { type: 'text', text: 'Analyze this post image. Suggest a short SEO-friendly filename in English (lowercase, hyphen-separated, ending in original extension) and a descriptive SEO alt tag in English describing the hair color, haircut, or style. You MUST return a valid JSON object ONLY. Use exactly this format: {"seoFilename": "...", "altText": "...", "caption": "..."}' },
                 {
                   type: 'image_url',
                   image_url: {
@@ -427,15 +427,19 @@ async function analyzeImageWithGemini(
           ],
           response_format: { type: 'json_object' }
         }),
-        signal: AbortSignal.timeout(18000) // 18s timeout for vision
+        signal: AbortSignal.timeout(25000) // 25s timeout for Claude Sonnet
       });
 
       if (openCodeRes.status === 200) {
         const data = await openCodeRes.json();
         const text = data.choices?.[0]?.message?.content;
         if (text) {
-          parsed = JSON.parse(text.trim());
-          console.log(`Success analyzing "${img.originalName}" with OpenCode mimo-v2.5-free:`, parsed);
+          let cleanText = text.trim();
+          if (cleanText.startsWith('```')) {
+            cleanText = cleanText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+          }
+          parsed = JSON.parse(cleanText.trim());
+          console.log(`Success analyzing "${img.originalName}" with OpenCode claude-sonnet-5:`, parsed);
           break;
         }
       } else {
