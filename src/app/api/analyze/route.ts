@@ -414,7 +414,13 @@ async function analyzeImageWithCloudflare(
 
   const kw = mainKeyword || "Hair Style";
   const prompt = `Analyze this hair style image. The focus keyword is "${kw}".
-Generate a highly optimized, short SEO filename (3-5 words, lowercase, hyphen-separated, ending in .jpg) and a search-optimized SEO alt tag (describing the hair style/color details, integrating the focus keyword "${kw}" naturally).
+Generate a highly optimized, short SEO filename (3-5 words, lowercase, hyphen-separated, ending in .jpg) and a search-optimized SEO alt tag.
+The alt text MUST:
+- Be descriptive + contextual (80-140 characters ideal).
+- Describe the specific hair style/color details, placement, skin harmony, or technique shown in the image.
+- Naturally integrate the focus keyword "${kw}" without keyword stuffing.
+- Be unique and professional.
+
 Do NOT include stop words like "image", "woman", "photo", "the", "has", "of" in the filename.
 
 You MUST respond exactly in this format:
@@ -607,7 +613,7 @@ async function analyzeImageWithGemini(
             {
               role: 'user',
               content: [
-                { type: 'text', text: 'Analyze this post image. The focus keyword of the post is: "' + (mainKeyword || 'hair style') + '". Suggest a short search-optimized SEO filename (3-5 words, lowercase, hyphen-separated, ending in original extension) and a search-optimized SEO alt tag (describing the hair style/color details, integrating the focus keyword naturally). Do NOT include stop words like "image", "woman", "photo", "the", "has", "of" in the filename. You MUST return a valid JSON object ONLY. Use exactly this format: {"seoFilename": "...", "altText": "...", "caption": "..."}' },
+                { type: 'text', text: 'Analyze this post image. The focus keyword of the post is: "' + (mainKeyword || 'hair style') + '". Suggest a short search-optimized SEO filename (3-5 words, lowercase, hyphen-separated, ending in original extension) and a search-optimized SEO alt tag. The alt tag MUST: 1. Be descriptive and contextual (80-140 characters ideal). 2. Describe style/color details, placement, skin harmony, or technique shown. 3. Naturally integrate the focus keyword without stuffing. Do NOT include stop words like "image", "woman", "photo", "the", "has", "of" in the filename. You MUST return a valid JSON object ONLY. Use exactly this format: {"seoFilename": "...", "altText": "...", "caption": "..."}' },
                 {
                   type: 'image_url',
                   image_url: {
@@ -917,8 +923,9 @@ Paragraph Output Rules:
 - Preserve exact structure.
 
 SEO Metadata Rules:
-- "metaDescription": under 160 characters, natural, includes keyword if possible.
-- "slug": lowercase, hyphen-separated, includes main keyword.
+- "seoTitle": MUST include focus keyword naturally, highly relevant, optimized for CTR, under 60 characters.
+- "metaDescription": 120-155 characters ideal, must be highly compelling, start with or contain the focusKeyword, and act as a click-worthy call-to-action.
+- "slug": lowercase, hyphen-separated, includes focus keyword.
 - "focusKeyword": use provided keyword (do not change intent).
 - "relatedKeywords": 3–5 closely related variations.
 - "pinterestTitle": engaging, keyword-focused.
@@ -929,7 +936,12 @@ Image Matching Rules:
 - Match images to the most relevant paragraph or section.
 - Do NOT guess or force placements.
 
-Each image must include:
+Each image matched MUST include:
+- "id": The image ID
+- "originalName": The original filename
+- "seoFilename": A highly optimized SEO filename (3-5 words, lowercase, hyphen-separated, ending in .jpg). Do NOT include stop words like "image", "woman", "photo", "the", "has", "of".
+- "altText": A search-optimized alt tag (80-140 characters). Must be highly descriptive, contextual, and unique. Naturally integrate the focus keyword or related keywords matching the surrounding paragraph context without keyword stuffing.
+- "caption": A concise caption (under 60 characters).
 - Accurate "placementParagraphIndex"
 - Matching "placementHeading" (must exist in article)
 - Clear "notes" explaining relevance
