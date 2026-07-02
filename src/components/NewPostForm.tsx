@@ -28,6 +28,7 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
   const [tags, setTags] = useState('');
   const [articleContent, setArticleContent] = useState('');
   const [model, setModel] = useState('mimo-v2.5-free');
+  const [visionProvider, setVisionProvider] = useState('cloudflare');
   
   // Custom SEO states
   const [useCustomSEO, setUseCustomSEO] = useState(false);
@@ -183,7 +184,8 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
       customGeminiKey,
       customSeoTitle: useCustomSEO ? customSeoTitle : '',
       customMetaDescription: useCustomSEO ? customMetaDescription : '',
-      customSlug: useCustomSEO ? customSlug : ''
+      customSlug: useCustomSEO ? customSlug : '',
+      visionProvider
     });
   };
 
@@ -436,6 +438,18 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
               <option value="gemini-2.5-pro">♊ Gemini 2.5 Pro (Vision & Text - Free Keys)</option>
               <option value="mimo-v2.5-free">⚡ MiniMax M2.5 Free (Fastest & Free)</option>
               <option value="big-pickle">🥒 Big Pickle (Large model)</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">Vision AI Provider</label>
+            <select
+              value={visionProvider}
+              onChange={(e) => setVisionProvider(e.target.value)}
+              className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-slate-50/30 font-medium text-slate-800"
+            >
+              <option value="cloudflare">☁️ Cloudflare Racing (Fast, Free & Rotated)</option>
+              <option value="opencode">⚡ OpenCode Zen (MiniMax mimo-v2.5-free)</option>
             </select>
           </div>
 

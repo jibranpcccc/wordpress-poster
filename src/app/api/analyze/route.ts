@@ -372,6 +372,86 @@ function extractFlexibleJson(rawText: string): any {
   }
 }
 
+// Visual analysis using Cloudflare Workers AI Llava 1.5 7B with rotated keys
+async function analyzeImageWithCloudflare(
+  img: { id: string; originalName: string; base64: string; ext: string },
+  imageIndex: number,
+  mainKeyword?: string
+): Promise<{ id: string; originalName: string; seoFilename: string; altText: string; caption: string }> {
+  let base64Data = img.base64;
+  if (base64Data.includes(';base64,')) {
+    base64Data = base64Data.split(';base64,')[1];
+  }
+
+  // Collect all Cloudflare credentials from environment
+  const creds: { key: string; acc: string }[] = [];
+  for (let i = 1; i <= 150; i++) {
+    const key = process.env[`CLOUDFLARE_API_KEY_${i}`];
+    const acc = process.env[`CLOUDFLARE_ACCOUNT_ID_${i}`];
+    if (key && acc) {
+      creds.push({ key: key.trim(), acc: acc.trim() });
+    }
+  }
+
+  if (creds.length === 0) {
+    throw new Error("No Cloudflare credentials found in environment variables");
+  }
+
+  // Shuffle credentials to distribute load / quota
+  const startIdx = Math.floor(Math.random() * creds.length);
+  const ordered = [...creds.slice(startIdx), ...creds.slice(0, startIdx)];
+
+  const buffer = Buffer.from(base64Data, 'base64');
+  const imageArray = Array.from(buffer);
+
+  for (const cred of ordered) {
+    try {
+      const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/@cf/llava-hf/llava-1.5-7b-hf`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${cred.key}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          image: imageArray,
+          prompt: 'Describe the hair color, haircut, or style in this image briefly in English.'
+        }),
+        signal: AbortSignal.timeout(18000)
+      });
+
+      if (res.status === 200) {
+        const data = await res.json();
+        if (data.success && data.result && data.result.description) {
+          const desc = data.result.description.trim();
+          // Generate clean slug from description
+          let slug = desc
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/(^-|-$)/g, '');
+          
+          if (slug.length > 50) {
+            slug = slug.split('-').slice(0, 7).join('-');
+          }
+          const ext = path.extname(img.originalName).toLowerCase() || '.jpg';
+          console.log(`Success analyzing "${img.originalName}" with Cloudflare Llava 1.5:`, desc);
+          return {
+            id: img.id,
+            originalName: img.originalName,
+            seoFilename: `${slug}${ext}`,
+            altText: desc,
+            caption: desc
+          };
+        }
+      }
+    } catch (e: any) {
+      console.warn(`Cloudflare key failed: ${e.message}`);
+    }
+  }
+
+  throw new Error("All Cloudflare credentials failed or returned errors");
+}
+
 // Visual analysis helper prioritizing OpenCode mimo-v2.5-free vision model with Gemini fallback
 async function analyzeImageWithGemini(
   img: { id: string; originalName: string; base64: string; ext: string },
@@ -380,7 +460,8 @@ async function analyzeImageWithGemini(
   envGeminiKey: string | null,
   customApiKey: string | null,
   geminiState: { failedGlobally: boolean },
-  mainKeyword?: string
+  mainKeyword?: string,
+  visionProvider: string = 'cloudflare'
 ): Promise<{ id: string; originalName: string; seoFilename: string; altText: string; caption: string; usedGeminiFallback?: boolean }> {
   let base64Data = img.base64;
   if (base64Data.includes(';base64,')) {
@@ -388,19 +469,26 @@ async function analyzeImageWithGemini(
   }
   
   const mimeType = img.ext === 'png' ? 'image/png' : img.ext === 'webp' ? 'image/webp' : 'image/jpeg';
-  let useGeminiFallback = false;
   let parsed: any = null;
 
-  // 1. Try OpenCode mimo-v2.5-free visual analysis first (with 1 retry on failure/timeout)
+  // 1. Try primary selected vision provider
+  if (visionProvider === 'cloudflare') {
+    try {
+      console.log(`Analyzing image "${img.originalName}" with Cloudflare Racing (Llava)...`);
+      const res = await analyzeImageWithCloudflare(img, imageIndex, mainKeyword);
+      return res;
+    } catch (cfErr: any) {
+      console.warn(`Cloudflare analysis failed: ${cfErr.message}. Falling back to OpenCode.`);
+    }
+  }
+
+  // 2. Try OpenCode mimo-v2.5-free visual analysis first (with 1 retry on failure/timeout)
   console.log(`Analyzing image "${img.originalName}" with OpenCode mimo-v2.5-free vision...`);
   const maxOpenCodeAttempts = 2;
   for (let attempt = 1; attempt <= maxOpenCodeAttempts; attempt++) {
     try {
       const openCodeKey = customApiKey || getApiKey();
-      if (!openCodeKey) {
-        useGeminiFallback = true;
-        break;
-      }
+      if (!openCodeKey) break;
 
       console.log(`OpenCode vision attempt ${attempt}/${maxOpenCodeAttempts} for "${img.originalName}"...`);
       const openCodeRes = await fetch('https://opencode.ai/zen/v1/chat/completions', {
@@ -445,15 +533,9 @@ async function analyzeImageWithGemini(
       } else {
         const errText = await openCodeRes.text();
         console.warn(`OpenCode attempt ${attempt} failed with status ${openCodeRes.status}: ${errText}`);
-        if (attempt === maxOpenCodeAttempts) {
-          useGeminiFallback = true;
-        }
       }
     } catch (e: any) {
       console.warn(`Exception on OpenCode attempt ${attempt} for "${img.originalName}": ${e.message}`);
-      if (attempt === maxOpenCodeAttempts) {
-        useGeminiFallback = true;
-      }
     }
 
     if (parsed) break;
@@ -475,7 +557,18 @@ async function analyzeImageWithGemini(
     };
   }
 
-  // 2. Text-only fallback if OpenCode vision fails — use mainKeyword for meaningful alt text
+  // 3. Fallback to Cloudflare if not primary and not tried yet
+  if (visionProvider !== 'cloudflare') {
+    try {
+      console.log(`Falling back to Cloudflare Racing for "${img.originalName}"...`);
+      const res = await analyzeImageWithCloudflare(img, imageIndex, mainKeyword);
+      return res;
+    } catch (cfErr: any) {
+      console.warn(`Fallback Cloudflare analysis failed: ${cfErr.message}`);
+    }
+  }
+
+  // 4. Text-only fallback if OpenCode vision fails — use mainKeyword for meaningful alt text
   console.warn(`All vision API options failed for "${img.originalName}". Using keyword-based fallback.`);
   const keywordSlug = (mainKeyword || 'hair style').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
   const ext2 = path.extname(img.originalName).toLowerCase() || '.jpg';
@@ -510,7 +603,8 @@ export async function POST(request: Request) {
           wpUrl,
           customSeoTitle,
           customMetaDescription,
-          customSlug
+          customSlug,
+          visionProvider = 'cloudflare'
         } = await request.json();
         const envGeminiKey = process.env.GEMINI_API_KEY || null;
 
@@ -619,7 +713,8 @@ export async function POST(request: Request) {
               envGeminiKey, 
               customApiKey || null, 
               geminiState,
-              mainKeyword
+              mainKeyword,
+              visionProvider
             );
             visionResults.push(res);
             
@@ -642,9 +737,9 @@ export async function POST(request: Request) {
           const pct = 15 + Math.round((completedCount / imagesWithBase64.length) * 45); // scales 15% to 60%
           sendProgress(pct, `Analyzed image ${completedCount}/${imagesWithBase64.length}: "${img.originalName}"...`);
           
-          // Respect rate limit: 4.5s delay if fell back to Gemini, or 1500ms delay if using OpenCode by default
+          // Respect rate limit: 100ms delay for Cloudflare (no rate limit), or 4.5s for Gemini, or 1500ms for OpenCode
           if (completedCount < imagesWithBase64.length) {
-            const delayMs = useGeminiDelay ? 4500 : 1500;
+            const delayMs = visionProvider === 'cloudflare' ? 100 : (useGeminiDelay ? 4500 : 1500);
             console.log(`[Vision Delay] Waiting ${delayMs}ms before next image...`);
             await new Promise(resolve => setTimeout(resolve, delayMs));
           }

@@ -74,6 +74,7 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
     customSeoTitle?: string;
     customMetaDescription?: string;
     customSlug?: string;
+    visionProvider?: string;
   }) => {
     setIsAnalyzing(true);
     setAnalysisProgress(0);
@@ -124,7 +125,8 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
           wpUrl: localStorage.getItem('wp_active_site_url') || localStorage.getItem('wp_site_url') || '',
           customSeoTitle: data.customSeoTitle,
           customMetaDescription: data.customMetaDescription,
-          customSlug: data.customSlug
+          customSlug: data.customSlug,
+          visionProvider: data.visionProvider
         })
       });
 
