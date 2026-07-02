@@ -410,7 +410,7 @@ async function analyzeImageWithGemini(
           'Authorization': `Bearer ${openCodeKey}`
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-5',
+          model: 'mimo-v2.5-free',
           messages: [
             {
               role: 'user',
@@ -427,7 +427,7 @@ async function analyzeImageWithGemini(
           ],
           response_format: { type: 'json_object' }
         }),
-        signal: AbortSignal.timeout(25000) // 25s timeout for Claude Sonnet
+        signal: AbortSignal.timeout(18000) // 18s timeout for vision
       });
 
       if (openCodeRes.status === 200) {
@@ -439,7 +439,7 @@ async function analyzeImageWithGemini(
             cleanText = cleanText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
           }
           parsed = JSON.parse(cleanText.trim());
-          console.log(`Success analyzing "${img.originalName}" with OpenCode claude-sonnet-5:`, parsed);
+          console.log(`Success analyzing "${img.originalName}" with OpenCode mimo-v2.5-free:`, parsed);
           break;
         }
       } else {
@@ -642,9 +642,9 @@ export async function POST(request: Request) {
           const pct = 15 + Math.round((completedCount / imagesWithBase64.length) * 45); // scales 15% to 60%
           sendProgress(pct, `Analyzed image ${completedCount}/${imagesWithBase64.length}: "${img.originalName}"...`);
           
-          // Respect rate limit: 4.5s delay if fell back to Gemini, or 500ms delay if using OpenCode by default
+          // Respect rate limit: 4.5s delay if fell back to Gemini, or 1500ms delay if using OpenCode by default
           if (completedCount < imagesWithBase64.length) {
-            const delayMs = useGeminiDelay ? 4500 : 500;
+            const delayMs = useGeminiDelay ? 4500 : 1500;
             console.log(`[Vision Delay] Waiting ${delayMs}ms before next image...`);
             await new Promise(resolve => setTimeout(resolve, delayMs));
           }
