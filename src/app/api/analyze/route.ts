@@ -255,24 +255,32 @@ function cleanJsonString(str: string): string {
 }
 
 function extractFlexibleJson(rawText: string): any {
+  const firstBrace = rawText.indexOf('{');
+  const lastBrace = rawText.lastIndexOf('}');
+  let jsonString = rawText;
+  
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    jsonString = rawText.substring(firstBrace, lastBrace + 1);
+  }
+
   try {
-    const cleaned = cleanJsonString(rawText);
+    const cleaned = cleanJsonString(jsonString);
     return JSON.parse(cleaned);
   } catch (parseErr: any) {
     console.warn("Standard JSON.parse failed. Attempting regex-based field extraction...", parseErr.message);
     
     // Helper to extract a string field
     const extractString = (field: string): string => {
-      const match = rawText.match(new RegExp(`"${field}"\\s*:\\s*"`));
+      const match = jsonString.match(new RegExp(`"${field}"\\s*:\\s*"`));
       if (!match) return '';
       const startIdx = match.index! + match[0].length;
       let endIdx = -1;
-      for (let i = startIdx; i < rawText.length; i++) {
-        if (rawText[i] === '"') {
+      for (let i = startIdx; i < jsonString.length; i++) {
+        if (jsonString[i] === '"') {
           let j = i + 1;
           let isEnd = false;
-          while (j < rawText.length) {
-            const c = rawText[j];
+          while (j < jsonString.length) {
+            const c = jsonString[j];
             if (/\s/.test(c)) {
               j++;
               continue;
@@ -286,7 +294,7 @@ function extractFlexibleJson(rawText: string): any {
           if (isEnd) {
             let escapeCount = 0;
             let k = i - 1;
-            while (k >= startIdx && rawText[k] === '\\') {
+            while (k >= startIdx && jsonString[k] === '\\') {
               escapeCount++;
               k--;
             }
@@ -298,7 +306,7 @@ function extractFlexibleJson(rawText: string): any {
         }
       }
       if (endIdx === -1) return '';
-      return rawText.substring(startIdx, endIdx)
+      return jsonString.substring(startIdx, endIdx)
         .replace(/\\"/g, '"')
         .replace(/\\n/g, '\n')
         .replace(/\\\\/g, '\\');
@@ -314,7 +322,7 @@ function extractFlexibleJson(rawText: string): any {
     const formattedArticleContent = extractString('formattedArticleContent');
 
     let relatedKeywords: string[] = [];
-    const keywordsMatch = rawText.match(/"relatedKeywords"\s*:\s*\[([\s\S]*?)\]/);
+    const keywordsMatch = jsonString.match(/"relatedKeywords"\s*:\s*\[([\s\S]*?)\]/);
     if (keywordsMatch) {
       relatedKeywords = keywordsMatch[1]
         .split(',')
@@ -322,7 +330,7 @@ function extractFlexibleJson(rawText: string): any {
     }
 
     const imageMatches: any[] = [];
-    const arrayMatch = rawText.match(/"imageMatches"\s*:\s*\[([\s\S]*?)\]/);
+    const arrayMatch = jsonString.match(/"imageMatches"\s*:\s*\[([\s\S]*?)\]/);
     if (arrayMatch) {
       const objectsText = arrayMatch[1];
       const objRegex = /\{([\s\S]*?)\}/g;
@@ -480,6 +488,57 @@ Alt Text: [SEO alt text]`;
   }
 
   throw new Error("All Cloudflare credentials failed or returned errors");
+}
+
+// Copywriting using Cloudflare Workers AI GLM 5.2 model with rotated keys
+async function copywriteWithCloudflare(
+  systemPrompt: string,
+  userContent: string
+): Promise<string> {
+  const creds: { key: string; acc: string }[] = [];
+  for (let i = 1; i <= 150; i++) {
+    const key = process.env[`CLOUDFLARE_API_KEY_${i}`];
+    const acc = process.env[`CLOUDFLARE_ACCOUNT_ID_${i}`];
+    if (key && acc) {
+      creds.push({ key: key.trim(), acc: acc.trim() });
+    }
+  }
+
+  if (creds.length === 0) {
+    throw new Error("No Cloudflare credentials found in environment variables");
+  }
+
+  const startIdx = Math.floor(Math.random() * creds.length);
+  const ordered = [...creds.slice(startIdx), ...creds.slice(0, startIdx)];
+
+  for (const cred of ordered) {
+    try {
+      const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/@cf/zai-org/glm-5.2`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${cred.key}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          prompt: `${systemPrompt}\n\nUser Input:\n${userContent}`,
+          max_tokens: 4096
+        }),
+        signal: AbortSignal.timeout(60000)
+      });
+
+      if (res.status === 200) {
+        const data = await res.json();
+        if (data.success && data.result && data.result.choices?.[0]?.text) {
+          return data.result.choices[0].text.trim();
+        }
+      }
+    } catch (e: any) {
+      console.warn(`Cloudflare copywrite key failed: ${e.message}`);
+    }
+  }
+
+  throw new Error("All Cloudflare credentials failed to copywrite");
 }
 
 // Visual analysis helper prioritizing OpenCode mimo-v2.5-free vision model with Gemini fallback
@@ -727,53 +786,36 @@ export async function POST(request: Request) {
           }
         }
 
-        // 2. Perform sequential vision analysis with a 500ms delay for OpenCode by default, or 4.5s delay if fell back to Gemini
-        sendProgress(15, `Starting visual analysis of ${imagesWithBase64.length} images...`);
-        let completedCount = 0;
-        const visionResults: any[] = [];
+        // 2. Perform parallel vision analysis using Promise.all for maximum speed
+        sendProgress(15, `Starting parallel visual analysis of ${imagesWithBase64.length} images...`);
         const geminiState = { failedGlobally: false };
-        let useGeminiDelay = false;
         
-        for (const img of imagesWithBase64) {
-          try {
-            const res = await analyzeImageWithGemini(
-              img, 
-              completedCount, 
-              customGeminiKey || null, 
-              envGeminiKey, 
-              customApiKey || null, 
-              geminiState,
-              mainKeyword,
-              visionProvider
-            );
-            visionResults.push(res);
-            
-            if (res.usedGeminiFallback) {
-              useGeminiDelay = true;
-            }
-          } catch (e: any) {
+        const visionPromises = imagesWithBase64.map((img, i) => {
+          return analyzeImageWithGemini(
+            img, 
+            i, 
+            customGeminiKey || null, 
+            envGeminiKey, 
+            customApiKey || null, 
+            geminiState,
+            mainKeyword,
+            visionProvider
+          ).catch((e: any) => {
             console.error(`Failed to analyze image "${img.originalName}":`, e.message || e);
             const kwSlug = (mainKeyword || 'hair style').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
             const imgExt = path.extname(img.originalName).toLowerCase() || '.jpg';
-            visionResults.push({
+            return {
               id: img.id,
               originalName: img.originalName,
-              seoFilename: `${kwSlug}-example-${completedCount + 1}${imgExt}`,
-              altText: `${mainKeyword || 'Hair style'} - example ${completedCount + 1}`,
+              seoFilename: `${kwSlug}-example-${i + 1}${imgExt}`,
+              altText: `${mainKeyword || 'Hair style'} - example ${i + 1}`,
               caption: ''
-            });
-          }
-          completedCount++;
-          const pct = 15 + Math.round((completedCount / imagesWithBase64.length) * 45); // scales 15% to 60%
-          sendProgress(pct, `Analyzed image ${completedCount}/${imagesWithBase64.length}: "${img.originalName}"...`);
-          
-          // Respect rate limit: 100ms delay for Cloudflare (no rate limit), or 4.5s for Gemini, or 1500ms for OpenCode
-          if (completedCount < imagesWithBase64.length) {
-            const delayMs = visionProvider === 'cloudflare' ? 100 : (useGeminiDelay ? 4500 : 1500);
-            console.log(`[Vision Delay] Waiting ${delayMs}ms before next image...`);
-            await new Promise(resolve => setTimeout(resolve, delayMs));
-          }
-        }
+            };
+          });
+        });
+
+        const visionResults = await Promise.all(visionPromises);
+        sendProgress(60, `Completed visual analysis of all ${imagesWithBase64.length} images.`);
 
         // Compile image visual insights into text context
         const preAnalyzedImagesText = visionResults.map(res => 
@@ -1159,21 +1201,49 @@ ${preAnalyzedImagesText}`;
           }
         };
 
+        // Helper: try Cloudflare copywriting with rotated keys
+        const tryCloudflareCopywrite = async () => {
+          if (responseData) return;
+          try {
+            sendProgress(75, `Submitting copywriter request to Cloudflare GLM 5.2 model...`);
+            const rawText = await copywriteWithCloudflare(systemPrompt, userContent);
+            if (rawText) {
+              console.log(`Success with Cloudflare GLM 5.2 copywriting.`);
+              processRawText(rawText, 'cloudflare-glm');
+            }
+          } catch (err: any) {
+            console.warn(`Cloudflare copywriting failed: ${err.message}`);
+            lastError = err;
+          }
+        };
+
         // ── Execute model chain ──
 
-        // 1. If user selected an OpenCode model, try it first
-        if (selectedModel && !selectedModel.startsWith('gemini-')) {
+        // 1. If user selected Cloudflare, try it first
+        if (selectedModel === 'cloudflare-glm') {
+          await tryCloudflareCopywrite();
+        }
+
+        // 2. If user selected an OpenCode model, try it first
+        if (!responseData && selectedModel && selectedModel !== 'cloudflare-glm' && !selectedModel.startsWith('gemini-')) {
           const normalizedModel = selectedModel === 'deepseek-v4-flash-free' ? 'deepseek-v4-flash' : selectedModel;
           await tryOpenCodeModel(normalizedModel, 45000);
         }
 
-        // 2. Fall back to other OpenCode models (primary text models)
+        // 3. Fall back to other models (including Cloudflare if not tried yet, and OpenCode text models)
         if (!responseData) {
-          const selectedNormalized = selectedModel === 'deepseek-v4-flash-free' ? 'deepseek-v4-flash' : (selectedModel?.startsWith('gemini-') ? null : selectedModel);
-          for (const model of ['mimo-v2.5-free', 'big-pickle', 'deepseek-v4-flash']) {
-            if (responseData) break;
-            if (model !== selectedNormalized) {
-              await tryOpenCodeModel(model, 45000);
+          // If Cloudflare was not the primary selected model, try it as the first fallback since it has 101 keys
+          if (selectedModel !== 'cloudflare-glm') {
+            await tryCloudflareCopywrite();
+          }
+          
+          if (!responseData) {
+            const selectedNormalized = selectedModel === 'deepseek-v4-flash-free' ? 'deepseek-v4-flash' : (selectedModel?.startsWith('gemini-') ? null : selectedModel);
+            for (const model of ['mimo-v2.5-free', 'big-pickle', 'deepseek-v4-flash']) {
+              if (responseData) break;
+              if (model !== selectedNormalized) {
+                await tryOpenCodeModel(model, 45000);
+              }
             }
           }
         }

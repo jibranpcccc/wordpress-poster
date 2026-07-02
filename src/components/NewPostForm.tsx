@@ -435,6 +435,7 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
               className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-slate-50/30 font-medium text-slate-800"
             >
               <option value="deepseek-v4-flash-free">🌟 DeepSeek V4 Flash (Recommended - Smartest & Free)</option>
+              <option value="cloudflare-glm">☁️ Cloudflare Racing (GLM 5.2 - Free & Rotated)</option>
               <option value="gemini-2.5-flash">♊ Gemini 2.5 Flash (Vision & Text - Free Keys)</option>
               <option value="gemini-2.5-pro">♊ Gemini 2.5 Pro (Vision & Text - Free Keys)</option>
               <option value="mimo-v2.5-free">⚡ MiniMax M2.5 Free (Fastest & Free)</option>
