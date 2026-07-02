@@ -372,7 +372,7 @@ function extractFlexibleJson(rawText: string): any {
   }
 }
 
-// Visual analysis using Cloudflare Workers AI Llava 1.5 7B with rotated keys
+// Visual analysis using Cloudflare Workers AI GLM 5.2 & Llava 1.5 with rotated keys
 async function analyzeImageWithCloudflare(
   img: { id: string; originalName: string; base64: string; ext: string },
   imageIndex: number,
@@ -405,6 +405,52 @@ async function analyzeImageWithCloudflare(
   const imageArray = Array.from(buffer);
 
   for (const cred of ordered) {
+    // 1. Try GLM-5.2 model first as requested
+    try {
+      const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/@cf/zai-org/glm-5.2`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${cred.key}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          image: imageArray,
+          prompt: 'Describe the hair color, haircut, or style in this image briefly in English.'
+        }),
+        signal: AbortSignal.timeout(18000)
+      });
+
+      if (res.status === 200) {
+        const data = await res.json();
+        if (data.success && data.result && data.result.choices?.[0]?.text) {
+          const desc = data.result.choices[0].text.trim();
+          if (desc) {
+            let slug = desc
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, '-')
+              .replace(/(^-|-$)/g, '');
+            
+            if (slug.length > 50) {
+              slug = slug.split('-').slice(0, 7).join('-');
+            }
+            const ext = path.extname(img.originalName).toLowerCase() || '.jpg';
+            console.log(`Success analyzing "${img.originalName}" with Cloudflare GLM 5.2:`, desc);
+            return {
+              id: img.id,
+              originalName: img.originalName,
+              seoFilename: `${slug}${ext}`,
+              altText: desc,
+              caption: desc
+            };
+          }
+        }
+      }
+    } catch (e: any) {
+      console.warn(`Cloudflare GLM 5.2 key failed: ${e.message}`);
+    }
+
+    // 2. Fallback to Llava 1.5 if GLM-5.2 failed on this credential
     try {
       const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/@cf/llava-hf/llava-1.5-7b-hf`;
       const res = await fetch(url, {
@@ -424,7 +470,6 @@ async function analyzeImageWithCloudflare(
         const data = await res.json();
         if (data.success && data.result && data.result.description) {
           const desc = data.result.description.trim();
-          // Generate clean slug from description
           let slug = desc
             .toLowerCase()
             .replace(/[^a-z0-9]+/g, '-')
@@ -434,7 +479,7 @@ async function analyzeImageWithCloudflare(
             slug = slug.split('-').slice(0, 7).join('-');
           }
           const ext = path.extname(img.originalName).toLowerCase() || '.jpg';
-          console.log(`Success analyzing "${img.originalName}" with Cloudflare Llava 1.5:`, desc);
+          console.log(`Success analyzing "${img.originalName}" with Cloudflare Llava 1.5 fallback:`, desc);
           return {
             id: img.id,
             originalName: img.originalName,
@@ -445,7 +490,7 @@ async function analyzeImageWithCloudflare(
         }
       }
     } catch (e: any) {
-      console.warn(`Cloudflare key failed: ${e.message}`);
+      console.warn(`Cloudflare Llava 1.5 fallback failed: ${e.message}`);
     }
   }
 

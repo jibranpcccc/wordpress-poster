@@ -16,6 +16,7 @@ interface NewPostFormProps {
     customSeoTitle?: string;
     customMetaDescription?: string;
     customSlug?: string;
+    visionProvider?: string;
   }) => void;
   isAnalyzing: boolean;
 }
