@@ -521,14 +521,28 @@ async function copywriteWithCloudflare(
     throw new Error("No Cloudflare credentials found in environment variables");
   }
 
-  const startIdx = Math.floor(Math.random() * creds.length);
-  const ordered = [...creds.slice(startIdx), ...creds.slice(0, startIdx)];
+  // Shuffle and pick a batch of 5 keys to try in parallel
+  const shuffled = [...creds].sort(() => Math.random() - 0.5);
+  const batchSize = Math.min(5, shuffled.length);
+  const batch = shuffled.slice(0, batchSize);
 
-  for (const cred of ordered) {
-    try {
-      console.log(`[Cloudflare Copywrite] Submitting request trying Key #${cred.index} from pool...`);
+  console.log(`[Cloudflare Copywrite] Running parallel race on Keys: ${batch.map(c => `#${c.index}`).join(', ')}...`);
+
+  return new Promise<string>((resolve, reject) => {
+    let resolved = false;
+    let completedCount = 0;
+    const errors: Error[] = [];
+    const controllers = batch.map(() => new AbortController());
+
+    batch.forEach((cred, idx) => {
+      const controller = controllers[idx];
       const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/@cf/zai-org/glm-5.2`;
-      const res = await fetch(url, {
+      
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+      }, 25000); // 25s timeout per request
+
+      fetch(url, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${cred.key}`,
@@ -538,28 +552,46 @@ async function copywriteWithCloudflare(
           prompt: `${systemPrompt}\n\nUser Input:\n${userContent}`,
           max_tokens: 4096
         }),
-        signal: AbortSignal.timeout(60000)
-      });
+        signal: controller.signal
+      })
+      .then(async res => {
+        clearTimeout(timeoutId);
+        if (resolved) return;
 
-      if (res.status === 200) {
-        const data = await res.json();
-        if (data.success && data.result && data.result.choices?.[0]?.text) {
-          console.log(`[Cloudflare Copywrite] Success on Key #${cred.index}.`);
-          return data.result.choices[0].text.trim();
-        } else {
-          const errMsg = data.errors?.[0]?.message || 'Unknown API error';
-          console.warn(`[Cloudflare Copywrite Warning] Key #${cred.index} returned error: ${errMsg}. Rotating...`);
+        if (res.status === 200) {
+          const data = await res.json();
+          if (data.success && data.result && data.result.choices?.[0]?.text) {
+            const text = data.result.choices[0].text.trim();
+            if (text && !resolved) {
+              resolved = true;
+              console.log(`[Cloudflare Copywrite] Key #${cred.index} WON the race!`);
+              // Abort all other pending requests
+              controllers.forEach((c, cIdx) => {
+                if (cIdx !== idx) {
+                  try {
+                    c.abort();
+                  } catch (e) {}
+                }
+              });
+              resolve(text);
+              return;
+            }
+          }
         }
-      } else {
-        const errText = await res.text();
-        console.warn(`[Cloudflare Copywrite Warning] Key #${cred.index} failed with HTTP status ${res.status}: ${errText.substring(0, 100)}. Rotating...`);
-      }
-    } catch (e: any) {
-      console.warn(`[Cloudflare Copywrite Warning] Key #${cred.index} exception: ${e.message}. Rotating...`);
-    }
-  }
-
-  throw new Error("All Cloudflare credentials failed to copywrite");
+        throw new Error(`Status ${res.status}`);
+      })
+      .catch(err => {
+        clearTimeout(timeoutId);
+        if (resolved) return;
+        errors.push(new Error(`Key #${cred.index}: ${err.message}`));
+        completedCount++;
+        console.warn(`[Cloudflare Copywrite Warning] Key #${cred.index} failed/aborted: ${err.message}`);
+        if (completedCount === batch.length && !resolved) {
+          reject(new Error("All keys in batch failed: " + errors.map(e => e.message).join(' | ')));
+        }
+      });
+    });
+  });
 }
 
 // Visual analysis helper prioritizing OpenCode mimo-v2.5-free vision model with Gemini fallback
