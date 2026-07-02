@@ -372,7 +372,7 @@ function extractFlexibleJson(rawText: string): any {
   }
 }
 
-// Visual analysis using Cloudflare Workers AI GLM 5.2 & Llava 1.5 with rotated keys
+// Visual analysis using Cloudflare Workers AI Llava 1.5 with rotated keys
 async function analyzeImageWithCloudflare(
   img: { id: string; originalName: string; base64: string; ext: string },
   imageIndex: number,
@@ -404,53 +404,16 @@ async function analyzeImageWithCloudflare(
   const buffer = Buffer.from(base64Data, 'base64');
   const imageArray = Array.from(buffer);
 
+  const kw = mainKeyword || "Hair Style";
+  const prompt = `Analyze this hair style image. The focus keyword is "${kw}".
+Generate a highly optimized, short SEO filename (3-5 words, lowercase, hyphen-separated, ending in .jpg) and a search-optimized SEO alt tag (describing the hair style/color details, integrating the focus keyword "${kw}" naturally).
+Do NOT include stop words like "image", "woman", "photo", "the", "has", "of" in the filename.
+
+You MUST respond exactly in this format:
+Filename: [seo-filename].jpg
+Alt Text: [SEO alt text]`;
+
   for (const cred of ordered) {
-    // 1. Try GLM-5.2 model first as requested
-    try {
-      const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/@cf/zai-org/glm-5.2`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${cred.key}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          image: imageArray,
-          prompt: 'Describe the hair color, haircut, or style in this image briefly in English.'
-        }),
-        signal: AbortSignal.timeout(18000)
-      });
-
-      if (res.status === 200) {
-        const data = await res.json();
-        if (data.success && data.result && data.result.choices?.[0]?.text) {
-          const desc = data.result.choices[0].text.trim();
-          if (desc) {
-            let slug = desc
-              .toLowerCase()
-              .replace(/[^a-z0-9]+/g, '-')
-              .replace(/(^-|-$)/g, '');
-            
-            if (slug.length > 50) {
-              slug = slug.split('-').slice(0, 7).join('-');
-            }
-            const ext = path.extname(img.originalName).toLowerCase() || '.jpg';
-            console.log(`Success analyzing "${img.originalName}" with Cloudflare GLM 5.2:`, desc);
-            return {
-              id: img.id,
-              originalName: img.originalName,
-              seoFilename: `${slug}${ext}`,
-              altText: desc,
-              caption: desc
-            };
-          }
-        }
-      }
-    } catch (e: any) {
-      console.warn(`Cloudflare GLM 5.2 key failed: ${e.message}`);
-    }
-
-    // 2. Fallback to Llava 1.5 if GLM-5.2 failed on this credential
     try {
       const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/@cf/llava-hf/llava-1.5-7b-hf`;
       const res = await fetch(url, {
@@ -461,7 +424,8 @@ async function analyzeImageWithCloudflare(
         },
         body: JSON.stringify({
           image: imageArray,
-          prompt: 'Describe the hair color, haircut, or style in this image briefly in English.'
+          prompt: prompt,
+          max_tokens: 256
         }),
         signal: AbortSignal.timeout(18000)
       });
@@ -470,27 +434,48 @@ async function analyzeImageWithCloudflare(
         const data = await res.json();
         if (data.success && data.result && data.result.description) {
           const desc = data.result.description.trim();
-          let slug = desc
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, '-')
-            .replace(/(^-|-$)/g, '');
           
-          if (slug.length > 50) {
-            slug = slug.split('-').slice(0, 7).join('-');
+          // Parse "Filename: ..." and "Alt Text: ..."
+          const filenameMatch = desc.match(/Filename:\s*([^\r\n]+)/i);
+          const altMatch = desc.match(/Alt\s*Text:\s*([^\r\n]+)/i);
+          
+          let seoFilename = '';
+          let altText = '';
+          
+          if (filenameMatch) {
+            seoFilename = filenameMatch[1].trim().replace(/['"`]/g, '');
           }
-          const ext = path.extname(img.originalName).toLowerCase() || '.jpg';
-          console.log(`Success analyzing "${img.originalName}" with Cloudflare Llava 1.5 fallback:`, desc);
+          if (altMatch) {
+            altText = altMatch[1].trim().replace(/['"`]/g, '');
+          }
+          
+          // Fallback if parsing failed
+          if (!seoFilename || !altText) {
+            const cleanDesc = desc.replace(/Filename:|Alt\s*Text:/gi, '').trim();
+            altText = cleanDesc || kw;
+            let slug = altText
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, '-')
+              .replace(/(^-|-$)/g, '');
+            if (slug.length > 50) {
+              slug = slug.split('-').slice(0, 7).join('-');
+            }
+            const ext = path.extname(img.originalName).toLowerCase() || '.jpg';
+            seoFilename = `${slug}${ext}`;
+          }
+          
+          console.log(`Success analyzing "${img.originalName}" with Cloudflare Llava 1.5:`, { seoFilename, altText });
           return {
             id: img.id,
             originalName: img.originalName,
-            seoFilename: `${slug}${ext}`,
-            altText: desc,
-            caption: desc
+            seoFilename,
+            altText,
+            caption: altText
           };
         }
       }
     } catch (e: any) {
-      console.warn(`Cloudflare Llava 1.5 fallback failed: ${e.message}`);
+      console.warn(`Cloudflare key failed: ${e.message}`);
     }
   }
 
@@ -548,7 +533,7 @@ async function analyzeImageWithGemini(
             {
               role: 'user',
               content: [
-                { type: 'text', text: 'Analyze this post image. Suggest a short SEO-friendly filename in English (lowercase, hyphen-separated, ending in original extension) and a descriptive SEO alt tag in English describing the hair color, haircut, or style. You MUST return a valid JSON object ONLY. Use exactly this format: {"seoFilename": "...", "altText": "...", "caption": "..."}' },
+                { type: 'text', text: 'Analyze this post image. The focus keyword of the post is: "' + (mainKeyword || 'hair style') + '". Suggest a short search-optimized SEO filename (3-5 words, lowercase, hyphen-separated, ending in original extension) and a search-optimized SEO alt tag (describing the hair style/color details, integrating the focus keyword naturally). Do NOT include stop words like "image", "woman", "photo", "the", "has", "of" in the filename. You MUST return a valid JSON object ONLY. Use exactly this format: {"seoFilename": "...", "altText": "...", "caption": "..."}' },
                 {
                   type: 'image_url',
                   image_url: {
