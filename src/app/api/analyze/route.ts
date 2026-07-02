@@ -379,7 +379,8 @@ async function analyzeImageWithGemini(
   customGeminiKey: string | null,
   envGeminiKey: string | null,
   customApiKey: string | null,
-  geminiState: { failedGlobally: boolean }
+  geminiState: { failedGlobally: boolean },
+  mainKeyword?: string
 ): Promise<{ id: string; originalName: string; seoFilename: string; altText: string; caption: string; usedGeminiFallback?: boolean }> {
   let base64Data = img.base64;
   if (base64Data.includes(';base64,')) {
@@ -470,14 +471,15 @@ async function analyzeImageWithGemini(
     };
   }
 
-  // 2. Text-only fallback if OpenCode vision fails
-  console.warn(`All vision API options failed for "${img.originalName}". Using text fallback.`);
-  const cleanName = img.originalName.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ");
+  // 2. Text-only fallback if OpenCode vision fails — use mainKeyword for meaningful alt text
+  console.warn(`All vision API options failed for "${img.originalName}". Using keyword-based fallback.`);
+  const keywordSlug = (mainKeyword || 'hair style').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  const ext2 = path.extname(img.originalName).toLowerCase() || '.jpg';
   return {
     id: img.id,
     originalName: img.originalName,
-    seoFilename: img.originalName.toLowerCase().replace(/[^a-z0-9.]+/g, '-'),
-    altText: `Image showing ${cleanName}`,
+    seoFilename: `${keywordSlug}-example-${imageIndex + 1}${ext2}`,
+    altText: `${mainKeyword || 'Hair style'} - example ${imageIndex + 1}`,
     caption: ''
   };
 }
@@ -612,7 +614,8 @@ export async function POST(request: Request) {
               customGeminiKey || null, 
               envGeminiKey, 
               customApiKey || null, 
-              geminiState
+              geminiState,
+              mainKeyword
             );
             visionResults.push(res);
             
@@ -621,11 +624,13 @@ export async function POST(request: Request) {
             }
           } catch (e: any) {
             console.error(`Failed to analyze image "${img.originalName}":`, e.message || e);
+            const kwSlug = (mainKeyword || 'hair style').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+            const imgExt = path.extname(img.originalName).toLowerCase() || '.jpg';
             visionResults.push({
               id: img.id,
               originalName: img.originalName,
-              seoFilename: img.originalName.toLowerCase().replace(/[^a-z0-9.]+/g, '-'),
-              altText: `Image showing ${img.originalName}`,
+              seoFilename: `${kwSlug}-example-${completedCount + 1}${imgExt}`,
+              altText: `${mainKeyword || 'Hair style'} - example ${completedCount + 1}`,
               caption: ''
             });
           }
@@ -935,7 +940,7 @@ ${preAnalyzedImagesText}`;
                 id: vr.id,
                 originalName: vr.originalName,
                 seoFilename: match?.seoFilename || vr.seoFilename,
-                altText: match?.altText || vr.altText || `Image showing ${vr.originalName.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ")}`,
+                altText: match?.altText || vr.altText || `${mainKeyword || 'Hair style'} - image ${idx + 1}`,
                 caption: match?.caption || vr.caption || '',
                 placementParagraphIndex: placementIndex,
                 useImage: true,
