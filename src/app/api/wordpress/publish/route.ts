@@ -130,8 +130,9 @@ export async function POST(request: Request) {
     const uploadDir = path.join(process.cwd(), 'public');
     const wpImageMap: { [localId: string]: { id: number; url: string } } = {};
 
-    // 3. Upload all active images to WP Media library
-    for (const img of activeImages) {
+    // 3. Upload all active images to WP Media library in parallel
+    console.log(`[WP Media] Starting parallel upload of ${activeImages.length} images to WordPress...`);
+    const uploadPromises = activeImages.map(async (img) => {
       try {
         if (img.wpMediaId) {
           console.log(`[WP Media] Image "${img.originalName}" is pre-uploaded (WP ID: ${img.wpMediaId}). Updating SEO metadata...`);
@@ -170,8 +171,7 @@ export async function POST(request: Request) {
             } catch (e) {}
           }
 
-          wpImageMap[img.id] = { id: img.wpMediaId, url: liveUrl };
-          continue;
+          return { localId: img.id, wpMedia: { id: img.wpMediaId, url: liveUrl } };
         }
 
         let fileBuffer: Buffer | null = null;
@@ -215,15 +215,23 @@ export async function POST(request: Request) {
 
         if (fileBuffer) {
           const wpMedia = await uploadAndSetImageSEO(fileBuffer, ext, img, cleanWpUrl, authHeader);
-          wpImageMap[img.id] = wpMedia;
+          return { localId: img.id, wpMedia };
         } else {
           throw new Error("No image buffer found");
         }
       } catch (mediaErr: any) {
         console.error(`Failed uploading image ${img.originalName} to WordPress:`, mediaErr);
-        // Proceed anyway but log error
+        return null;
       }
-    }
+    });
+
+    const uploadResults = await Promise.all(uploadPromises);
+    uploadResults.forEach(res => {
+      if (res) {
+        wpImageMap[res.localId] = res.wpMedia;
+      }
+    });
+    console.log(`[WP Media] Parallel image uploads completed.`);
 
     // 4. Determine featured media ID
     let wpFeaturedMediaId = 0;
