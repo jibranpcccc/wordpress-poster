@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0] - 2026-07-02
+
+### Added
+- **cPanel Integration & Deployment**: Configured Next.js to compile in `standalone` mode and built an automated deployment script to pack, upload, and extract code directly onto cPanel hosting (`https://sainpricing.pp.ua`).
+- **LiteSpeed Server Routing**: Corrected Phusion Passenger and LiteSpeed redirect configurations via automated `.htaccess` regeneration, fixing the 404/503 errors and linking Apache to the application root.
+
 ## [1.2.0] - 2026-07-02
 
 ### Added
