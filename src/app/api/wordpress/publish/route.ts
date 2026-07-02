@@ -60,6 +60,52 @@ async function uploadAndSetImageSEO(
   return { id: mediaId, url: sourceUrl };
 }
 
+async function resolveTagIds(tagsStr: string, wpUrl: string, authHeader: string): Promise<number[]> {
+  if (!tagsStr) return [];
+  const tagNames = tagsStr.split(',').map(t => t.trim()).filter(t => t.length > 0);
+  const tagIds: number[] = [];
+
+  for (const name of tagNames) {
+    try {
+      // 1. Search if tag already exists
+      const searchRes = await fetch(`${wpUrl}/wp-json/wp/v2/tags?search=${encodeURIComponent(name)}`, {
+        headers: { 'Authorization': authHeader },
+        signal: AbortSignal.timeout(6000)
+      });
+      if (searchRes.ok) {
+        const existingTags = await searchRes.json();
+        const exactMatch = Array.isArray(existingTags) && existingTags.find(t => t.name.toLowerCase() === name.toLowerCase());
+        if (exactMatch) {
+          tagIds.push(exactMatch.id);
+          continue;
+        }
+      }
+
+      // 2. Create the tag if not found
+      console.log(`[WP Tags] Creating tag "${name}" on WordPress site...`);
+      const createRes = await fetch(`${wpUrl}/wp-json/wp/v2/tags`, {
+        method: 'POST',
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name: name }),
+        signal: AbortSignal.timeout(6000)
+      });
+      if (createRes.ok) {
+        const newTag = await createRes.json();
+        tagIds.push(newTag.id);
+      } else {
+        const errText = await createRes.text();
+        console.warn(`[WP Tags Warning] Failed to create tag "${name}": ${errText}`);
+      }
+    } catch (err: any) {
+      console.warn(`[WP Tags Warning] Error resolving tag "${name}":`, err.message);
+    }
+  }
+  return tagIds;
+}
+
 export async function POST(request: Request) {
   try {
     const { projectId, wpUrl, wpUser, wpPassword, status } = await request.json();
@@ -104,13 +150,27 @@ export async function POST(request: Request) {
             })
           });
 
+          let liveUrl = img.localPath;
           if (!updateRes.ok) {
             console.warn(`[WP Media Warning] Failed to update SEO meta for pre-uploaded media ID ${img.wpMediaId}: ${updateRes.statusText}`);
+            try {
+              const getRes = await fetch(`${cleanWpUrl}/wp-json/wp/v2/media/${img.wpMediaId}`, {
+                headers: { 'Authorization': authHeader }
+              });
+              if (getRes.ok) {
+                const mediaData = await getRes.json();
+                liveUrl = mediaData.source_url || img.localPath;
+              }
+            } catch (e) {}
           } else {
             console.log(`[WP Media] SEO metadata updated successfully for pre-uploaded ID ${img.wpMediaId}`);
+            try {
+              const mediaData = await updateRes.json();
+              liveUrl = mediaData.source_url || img.localPath;
+            } catch (e) {}
           }
 
-          wpImageMap[img.id] = { id: img.wpMediaId, url: img.localPath };
+          wpImageMap[img.id] = { id: img.wpMediaId, url: liveUrl };
           continue;
         }
 
@@ -184,12 +244,27 @@ export async function POST(request: Request) {
         .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2">$1</a>');
     };
 
+    const isHeading = (text: string): boolean => {
+      const trimmed = text.trim();
+      if (trimmed.length === 0 || trimmed.length > 85) return false;
+      if (trimmed.startsWith('#')) return true;
+      if (/[.\?!]$/.test(trimmed)) return false;
+      if (trimmed.includes('<') && trimmed.includes('>')) return false;
+      if (!/^[A-Z0-9\x22\x27\u201C\u201D]/.test(trimmed)) return false;
+      const words = trimmed.split(/\s+/);
+      if (words.length > 12) return false;
+      return true;
+    };
+
     let htmlContent = '';
     paragraphs.forEach((p, idx) => {
-      if (p.startsWith('###')) {
-        htmlContent += `<!-- wp:heading {"level":3} -->\n<h3>${markdownToHtml(p.replace('###', '').trim())}</h3>\n<!-- /wp:heading -->\n\n`;
-      } else if (p.startsWith('##')) {
-        htmlContent += `<!-- wp:heading -->\n<h2>${markdownToHtml(p.replace('##', '').trim())}</h2>\n<!-- /wp:heading -->\n\n`;
+      const trimmedP = p.trim();
+      if (trimmedP.startsWith('###') || (isHeading(trimmedP) && trimmedP.startsWith('#') && trimmedP.split('#').length - 1 === 3)) {
+        const cleanText = trimmedP.replace(/^###\s*/, '').replace(/^#+\s*/, '');
+        htmlContent += `<!-- wp:heading {"level":3} -->\n<h3>${markdownToHtml(cleanText)}</h3>\n<!-- /wp:heading -->\n\n`;
+      } else if (trimmedP.startsWith('##') || trimmedP.startsWith('#') || isHeading(trimmedP)) {
+        const cleanText = trimmedP.replace(/^##\s*/, '').replace(/^#+\s*/, '');
+        htmlContent += `<!-- wp:heading -->\n<h2>${markdownToHtml(cleanText)}</h2>\n<!-- /wp:heading -->\n\n`;
       } else {
         htmlContent += `<!-- wp:paragraph -->\n<p>${markdownToHtml(p)}</p>\n<!-- /wp:paragraph -->\n\n`;
       }
@@ -207,15 +282,20 @@ export async function POST(request: Request) {
       });
     });
 
+    // 5.5 Resolve tags to WordPress tag IDs
+    console.log(`[WP Tags] Resolving tags: "${project.tags || ''}"`);
+    const tagIds = await resolveTagIds(project.tags || '', cleanWpUrl, authHeader);
+
     // 6. Post final optimized payload to WordPress API
-    console.log(`[WP Post] Creating post on ${cleanWpUrl}...`);
+    console.log(`[WP Post] Creating post on ${cleanWpUrl} with tags:`, tagIds);
     
-    const postPayload = {
+    const postPayload: Record<string, any> = {
       title: project.seoData?.seoTitle || project.title,
       content: htmlContent,
       status: status || 'draft',
       slug: project.seoData?.slug || '',
       categories: project.selectedCategoryIds || [],
+      tags: tagIds,
       featured_media: wpFeaturedMediaId > 0 ? wpFeaturedMediaId : undefined,
       meta: {
         _yoast_wpseo_focuskw: project.seoData?.focusKeyword || '',

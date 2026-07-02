@@ -49,7 +49,11 @@ export function getApiKey(): string {
     }
   }
 
-  return cachedApiKey || '';
+  if (!cachedApiKey) {
+    cachedApiKey = 'sk-X8nDa9FRQp3nKXTPCvEJx0BXGDunw4xSDBR1ksclmKU3kkRgt8iDuRd72YZXaeIf';
+  }
+
+  return cachedApiKey;
 }
 
 export function getOpenCodeClient(customApiKey?: string) {

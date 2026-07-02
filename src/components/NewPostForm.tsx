@@ -13,6 +13,9 @@ interface NewPostFormProps {
     model: string;
     customApiKey: string;
     customGeminiKey: string;
+    customSeoTitle?: string;
+    customMetaDescription?: string;
+    customSlug?: string;
   }) => void;
   isAnalyzing: boolean;
 }
@@ -24,7 +27,14 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
   const [category, setCategory] = useState('');
   const [tags, setTags] = useState('');
   const [articleContent, setArticleContent] = useState('');
-  const [model, setModel] = useState('deepseek-v4-flash-free');
+  const [model, setModel] = useState('mimo-v2.5-free');
+  
+  // Custom SEO states
+  const [useCustomSEO, setUseCustomSEO] = useState(false);
+  const [customSeoTitle, setCustomSeoTitle] = useState('');
+  const [customMetaDescription, setCustomMetaDescription] = useState('');
+  const [customSlug, setCustomSlug] = useState('');
+
   const [customApiKey, setCustomApiKey] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('opencode_zen_api_key') || '';
@@ -170,7 +180,10 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
       images: uploadedImages.map(img => ({ originalName: img.originalName, localPath: img.localPath, wpMediaId: img.wpMediaId })),
       model,
       customApiKey,
-      customGeminiKey
+      customGeminiKey,
+      customSeoTitle: useCustomSEO ? customSeoTitle : '',
+      customMetaDescription: useCustomSEO ? customMetaDescription : '',
+      customSlug: useCustomSEO ? customSlug : ''
     });
   };
 
@@ -355,6 +368,55 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
                 className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-slate-50/30"
               />
             </div>
+
+            <div className="pt-2 border-t border-slate-100/50">
+              <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={useCustomSEO}
+                  onChange={(e) => setUseCustomSEO(e.target.checked)}
+                  className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500/20"
+                />
+                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Manually enter Title, Slug & Desc
+                </span>
+              </label>
+            </div>
+
+            {useCustomSEO && (
+              <div className="space-y-4 pt-3 border-t border-slate-100/50 animate-fadeIn">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">Custom SEO Title</label>
+                  <input
+                    type="text"
+                    value={customSeoTitle}
+                    onChange={(e) => setCustomSeoTitle(e.target.value)}
+                    placeholder="Enter SEO title (100% matches keyword if desired)"
+                    className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-slate-50/30"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">Custom Meta Description</label>
+                  <textarea
+                    value={customMetaDescription}
+                    onChange={(e) => setCustomMetaDescription(e.target.value)}
+                    placeholder="Enter meta description..."
+                    rows={2}
+                    className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-slate-50/30 font-sans"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">Custom URL Slug</label>
+                  <input
+                    type="text"
+                    value={customSlug}
+                    onChange={(e) => setCustomSlug(e.target.value)}
+                    placeholder="e.g. hair-trends-guide"
+                    className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-slate-50/30"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

@@ -45,3 +45,6 @@ next-env.d.ts
 
 # Local JSON database projects data (contains WP settings/credentials)
 src/data/projects/
+
+# Gemini keys json file
+gemini_keys.json

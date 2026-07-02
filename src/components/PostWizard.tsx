@@ -71,6 +71,9 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
     model: string;
     customApiKey: string;
     customGeminiKey: string;
+    customSeoTitle?: string;
+    customMetaDescription?: string;
+    customSlug?: string;
   }) => {
     setIsAnalyzing(true);
     setAnalysisProgress(0);
@@ -118,7 +121,10 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
           customApiKey: data.customApiKey,
           customGeminiKey: data.customGeminiKey,
           model: data.model,
-          wpUrl: localStorage.getItem('wp_active_site_url') || localStorage.getItem('wp_site_url') || ''
+          wpUrl: localStorage.getItem('wp_active_site_url') || localStorage.getItem('wp_site_url') || '',
+          customSeoTitle: data.customSeoTitle,
+          customMetaDescription: data.customMetaDescription,
+          customSlug: data.customSlug
         })
       });
 

@@ -63,44 +63,8 @@ function ensureDir() {
 let firestoreDb: any = null;
 let isFirebaseInitialized = false;
 
-function getFirebaseDb() {
-  if (isFirebaseInitialized) return firestoreDb;
-
-  const hasServiceAccount = !!process.env.FIREBASE_SERVICE_ACCOUNT;
-  const hasIndividualKeys = !!(process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL);
-
-  if (hasServiceAccount || hasIndividualKeys) {
-    try {
-      if (getApps().length === 0) {
-        let credential;
-        if (hasServiceAccount) {
-          console.log("[DB] Initializing Firebase Admin with FIREBASE_SERVICE_ACCOUNT JSON...");
-          const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT!);
-          credential = cert(serviceAccount);
-        } else {
-          console.log("[DB] Initializing Firebase Admin with individual environment variables...");
-          credential = cert({
-            projectId: process.env.FIREBASE_PROJECT_ID,
-            clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-            privateKey: process.env.FIREBASE_PRIVATE_KEY!.replace(/\\n/g, '\n'),
-          });
-        }
-
-        initializeApp({
-          credential,
-        });
-      }
-      firestoreDb = getFirestore();
-      isFirebaseInitialized = true;
-      console.log("[DB] Firebase Firestore initialized successfully.");
-      return firestoreDb;
-    } catch (e) {
-      console.error("[DB] Failed to initialize Firebase Admin:", e);
-    }
-  } else {
-    console.log("[DB] Firebase credentials not found. Falling back to flat-file JSON database.");
-  }
-  return null;
+function getFirebaseDb(): any {
+  return null; // Always local flat-files, Firebase disabled
 }
 
 export const db = {
