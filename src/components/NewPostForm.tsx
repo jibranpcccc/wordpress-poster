@@ -28,7 +28,7 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
   const [category, setCategory] = useState('');
   const [tags, setTags] = useState('');
   const [articleContent, setArticleContent] = useState('');
-  const [model, setModel] = useState('mimo-v2.5-free');
+  const [model, setModel] = useState('cloudflare-glm');
   const [visionProvider, setVisionProvider] = useState('cloudflare');
   
   // Custom SEO states

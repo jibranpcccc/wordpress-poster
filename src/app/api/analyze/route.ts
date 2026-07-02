@@ -391,13 +391,13 @@ async function analyzeImageWithCloudflare(
     base64Data = base64Data.split(';base64,')[1];
   }
 
-  // Collect all Cloudflare credentials from environment
-  const creds: { key: string; acc: string }[] = [];
+  // Collect all Cloudflare credentials from environment with index tracking
+  const creds: { key: string; acc: string; index: number }[] = [];
   for (let i = 1; i <= 150; i++) {
     const key = process.env[`CLOUDFLARE_API_KEY_${i}`];
     const acc = process.env[`CLOUDFLARE_ACCOUNT_ID_${i}`];
     if (key && acc) {
-      creds.push({ key: key.trim(), acc: acc.trim() });
+      creds.push({ key: key.trim(), acc: acc.trim(), index: i });
     }
   }
 
@@ -423,6 +423,7 @@ Alt Text: [SEO alt text]`;
 
   for (const cred of ordered) {
     try {
+      console.log(`[Cloudflare Vision] Analyzing "${img.originalName}" trying Key #${cred.index} from pool...`);
       const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/@cf/llava-hf/llava-1.5-7b-hf`;
       const res = await fetch(url, {
         method: 'POST',
@@ -472,7 +473,7 @@ Alt Text: [SEO alt text]`;
             seoFilename = `${slug}${ext}`;
           }
           
-          console.log(`Success analyzing "${img.originalName}" with Cloudflare Llava 1.5:`, { seoFilename, altText });
+          console.log(`[Cloudflare Vision] Success on Key #${cred.index} for "${img.originalName}":`, { seoFilename, altText });
           return {
             id: img.id,
             originalName: img.originalName,
@@ -480,10 +481,16 @@ Alt Text: [SEO alt text]`;
             altText,
             caption: altText
           };
+        } else {
+          const errMsg = data.errors?.[0]?.message || 'Unknown API error';
+          console.warn(`[Cloudflare Vision Warning] Key #${cred.index} returned error: ${errMsg}. Rotating to next key...`);
         }
+      } else {
+        const errText = await res.text();
+        console.warn(`[Cloudflare Vision Warning] Key #${cred.index} failed with HTTP status ${res.status}: ${errText.substring(0, 100)}. Rotating...`);
       }
     } catch (e: any) {
-      console.warn(`Cloudflare key failed: ${e.message}`);
+      console.warn(`[Cloudflare Vision Warning] Key #${cred.index} exception: ${e.message}. Rotating...`);
     }
   }
 
@@ -495,12 +502,12 @@ async function copywriteWithCloudflare(
   systemPrompt: string,
   userContent: string
 ): Promise<string> {
-  const creds: { key: string; acc: string }[] = [];
+  const creds: { key: string; acc: string; index: number }[] = [];
   for (let i = 1; i <= 150; i++) {
     const key = process.env[`CLOUDFLARE_API_KEY_${i}`];
     const acc = process.env[`CLOUDFLARE_ACCOUNT_ID_${i}`];
     if (key && acc) {
-      creds.push({ key: key.trim(), acc: acc.trim() });
+      creds.push({ key: key.trim(), acc: acc.trim(), index: i });
     }
   }
 
@@ -513,6 +520,7 @@ async function copywriteWithCloudflare(
 
   for (const cred of ordered) {
     try {
+      console.log(`[Cloudflare Copywrite] Submitting request trying Key #${cred.index} from pool...`);
       const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/@cf/zai-org/glm-5.2`;
       const res = await fetch(url, {
         method: 'POST',
@@ -530,11 +538,18 @@ async function copywriteWithCloudflare(
       if (res.status === 200) {
         const data = await res.json();
         if (data.success && data.result && data.result.choices?.[0]?.text) {
+          console.log(`[Cloudflare Copywrite] Success on Key #${cred.index}.`);
           return data.result.choices[0].text.trim();
+        } else {
+          const errMsg = data.errors?.[0]?.message || 'Unknown API error';
+          console.warn(`[Cloudflare Copywrite Warning] Key #${cred.index} returned error: ${errMsg}. Rotating...`);
         }
+      } else {
+        const errText = await res.text();
+        console.warn(`[Cloudflare Copywrite Warning] Key #${cred.index} failed with HTTP status ${res.status}: ${errText.substring(0, 100)}. Rotating...`);
       }
     } catch (e: any) {
-      console.warn(`Cloudflare copywrite key failed: ${e.message}`);
+      console.warn(`[Cloudflare Copywrite Warning] Key #${cred.index} exception: ${e.message}. Rotating...`);
     }
   }
 
