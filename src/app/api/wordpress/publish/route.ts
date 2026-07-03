@@ -363,6 +363,30 @@ export async function POST(request: Request) {
     const livePost = await postRes.json();
     console.log(`[WP Post] Success! Live Link: ${livePost.link}`);
 
+    // Clean up Firestore data (Delete temporary project & base64 images since they are now live on user's hosting)
+    try {
+      console.log(`[WP Publish] Cleaning up Firestore data for completed project ${projectId}...`);
+      await db.deleteProject(projectId);
+      
+      if (project.images && project.images.length > 0) {
+        for (const img of project.images) {
+          if (img.localPath && img.localPath.includes('?id=')) {
+            try {
+              // Extract the imageId from localPath query parameter
+              const urlObj = new URL(img.localPath, 'http://localhost');
+              const imageId = urlObj.searchParams.get('id');
+              if (imageId) {
+                await db.deleteImage(imageId);
+              }
+            } catch (pErr) {}
+          }
+        }
+      }
+      console.log(`[WP Publish] Firestore cleanup completed successfully.`);
+    } catch (cleanErr: any) {
+      console.warn(`[WP Publish Warning] Failed to clean up completed Firestore data:`, cleanErr.message);
+    }
+
     return NextResponse.json({
       success: true,
       link: livePost.link,
@@ -373,3 +397,4 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: e.message || 'Failed to publish post to WordPress' }, { status: 500 });
   }
 }
+
