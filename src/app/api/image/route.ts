@@ -3,6 +3,9 @@ import { db } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
+// Force Next.js to treat this route as dynamic and disable Netlify CDN caching
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -19,7 +22,10 @@ export async function GET(request: Request) {
       return new Response(buffer, {
         headers: {
           'Content-Type': imgAsset.contentType || 'image/jpeg',
-          'Cache-Control': 'public, max-age=31536000, immutable'
+          // Disable caching to prevent Netlify CDN/browser caching collision
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
         }
       });
     }
@@ -34,7 +40,9 @@ export async function GET(request: Request) {
       return new Response(fileBuffer, {
         headers: {
           'Content-Type': mimeType,
-          'Cache-Control': 'public, max-age=31536000, immutable'
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
         }
       });
     }
@@ -44,3 +52,4 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: e.message || 'Failed to retrieve image' }, { status: 500 });
   }
 }
+

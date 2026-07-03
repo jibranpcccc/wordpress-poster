@@ -356,7 +356,12 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
                 {uploadedImages.map((img, i) => (
                   <div key={i} className="relative group border border-slate-100 rounded-xl overflow-hidden shadow-sm bg-slate-50 aspect-video">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={img.localPath} alt={img.originalName} className="object-cover w-full h-full" />
+                    <img 
+                      src={img.localPath.includes('?') ? `${img.localPath}&t=${img.originalName}` : `${img.localPath}?t=${img.originalName}`} 
+                      alt={img.originalName} 
+                      className="object-cover w-full h-full" 
+                    />
+
                     <button
                       type="button"
                       onClick={(e) => {
