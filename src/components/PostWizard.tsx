@@ -134,10 +134,10 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
 
       if (totalImages > 0) {
         setAnalysisStatus(`Analyzing ${totalImages} image(s)...`);
-        addLog(`VISION: Processing ${totalImages} image(s) in chunks of 2 using provider: "${data.visionProvider || 'cloudflare'}"...`);
+        addLog(`VISION: Describing hair in ${totalImages} image(s) in fast chunks of 5 using provider: "${data.visionProvider || 'cloudflare'}"...`);
         let completed = 0;
         const images = draftProject.images;
-        const chunkSize = 2;
+        const chunkSize = 5;
         visionResults = new Array(totalImages);
 
         for (let i = 0; i < images.length; i += chunkSize) {
@@ -165,23 +165,20 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
               completed++;
               const percent = Math.round(5 + (completed / totalImages) * 45); // up to 50%
               setAnalysisProgress(percent);
-              setAnalysisStatus(`Analyzed ${completed} of ${totalImages} image(s)...`);
-              addLog(`VISION: Image "${img.originalName}" analyzed successfully.`);
+              setAnalysisStatus(`Described ${completed} of ${totalImages} image(s)...`);
+              addLog(`VISION: Image "${img.originalName}" described: ${(parsed.visualDescription || '').substring(0, 60)}...`);
               visionResults[index] = parsed;
             } catch (err: any) {
-              console.warn(`Vision analysis failed for image ${img.originalName}, using fallback:`, err);
+              console.warn(`Vision failed for image ${img.originalName}, using fallback:`, err);
               completed++;
-              addLog(`WARNING: Vision analysis failed for "${img.originalName}". Applied keyword-based fallback.`);
-              // Generate unique fallback based on original filename to prevent duplicate SEO fields
-              const stem = img.originalName.replace(/\.[^/.]+$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-              const kwSlug = (data.mainKeyword || 'hair-style').toLowerCase().replace(/[^a-z0-9]+/g, '-');
-              const finalFn = stem.length >= 3 ? `${stem}.jpg` : `${kwSlug}-image-${index}.jpg`;
-              const cleanStem = img.originalName.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+              addLog(`WARNING: Vision failed for "${img.originalName}". Using filename-based fallback.`);
+              const cleanStem = img.originalName.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ').replace(/\d{10,}/g, '').trim();
               visionResults[index] = {
                 id: img.id,
                 originalName: img.originalName,
-                seoFilename: finalFn,
-                altText: `${data.mainKeyword || 'Hair style'} hair view showing ${cleanStem}.`,
+                visualDescription: `Hair style shown in ${cleanStem || 'uploaded image'}.`,
+                seoFilename: '',
+                altText: '',
                 caption: ''
               };
             }

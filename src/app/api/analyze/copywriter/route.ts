@@ -534,7 +534,7 @@ Output Schema:
           .join('\n\n');
 
         const preAnalyzedImagesText = visionResults
-          .map((vr: any) => `Image ID: ${vr.id}\nOriginal Name: ${vr.originalName}\nVisual Analysis: ${vr.altText}`)
+          .map((vr: any) => `Image ID: ${vr.id}\nOriginal Name: ${vr.originalName}\nHair Description: ${vr.visualDescription || vr.altText || 'Hair style image — no visual description available'}`)
           .join('\n\n');
 
         let userContent = `Here is the article details.
@@ -544,8 +544,8 @@ Related Keywords Input: "${relatedKeywords}"
 Here is the article text, paragraph-by-paragraph:
 ${paragraphListText}
 
-Below are the uploaded images that have been visually pre-analyzed.
-Please review their visual description, suggest their optimal placement in the article text, and return the final JSON payload containing the SEO meta details, formatted article content (wrapped headings and inline bolds/italics/links only), and the images placement mapping.
+Below are the uploaded images with their hair descriptions from visual AI analysis.
+You are the SEO authority: generate the final seoFilename, altText, and caption for each image based on these descriptions and the article context. Do NOT copy the description verbatim — optimize it for SEO.
 
 Pre-Analyzed Images List:
 ${preAnalyzedImagesText}`;
@@ -720,28 +720,64 @@ ${preAnalyzedImagesText}`;
         const finalImageMatches: any[] = [];
         const occupiedIndices = new Set<number>();
 
-        // Sanitize AI-generated image SEO fields
-        const BANNED_FILENAME_RE = /^(hair-style|long-hair-style|short-hair-style|hairstyle-woman|hairstyle-photo|woman-hairstyle|hair-style-woman|medium-hair-style|hairstyle-analysis)/i;
-        const BANNED_FN_WORDS = ['woman', 'photo', 'image', 'picture', 'girl', 'model'];
-        const BANNED_ALT_RE = /\b(woman|girl|man|person|model|client|shirt|sweater|blouse|dress|earrings|necklace|hair tie|sitting|standing|selfie|posing|wearing|room|bed|bedroom|chair|mirror|wall|background|sofa|window|photo|image|picture|face|smile|eyes)\b/gi;
+        // Sanitize AI-generated image SEO fields — cleanup for template placeholders, backticks, etc.
+        const BANNED_FILENAME_RE = /^(hair-style|long-hair-style|short-hair-style|hairstyle-woman|hairstyle-photo|woman-hairstyle|hair-style-woman|medium-hair-style|hairstyle-analysis|seo-filename|name|seo-name)/i;
+        const BANNED_FN_WORDS = ['woman', 'photo', 'image', 'picture', 'girl', 'model', 'seo-filename', '[seo', '[name', 'words-lowercase', 'hyphen-separated'];
+        const BANNED_ALT_RE = /\b(woman|girl|man|person|model|client|shirt|sweater|blouse|dress|earrings|necklace|hair tie|sitting|standing|selfie|posing|wearing|room|bed|bedroom|chair|mirror|wall|background|sofa|window|photo|image|picture|smile|eyes)\b/gi;
 
-        function sanitizeImageSEO(seoFilename: string, altText: string, fallbackKw: string): { seoFilename: string; altText: string } {
-          // Fix generic filenames
+        // Strip template placeholders, backticks, character counts, and instruction text from AI output
+        function cleanAIOutput(text: string): string {
+          return text
+            .replace(/^[`*]+|[`*]+$/g, '')                          // leading/trailing backticks/asterisks
+            .replace(/`/g, '')                                       // all backticks
+            .replace(/\(\d{1,3}\s*characters?\)/gi, '')              // (95 characters)
+            .replace(/\d{1,3}\s*chars?\??/gi, '')                    // 95 chars?
+            .replace(/\[seo[^\]]*\]/gi, '')                          // [seo filename], [SEO alt text]
+            .replace(/\[name\]/gi, '')                               // [name]
+            .replace(/\bYes\.?\b/gi, '')                             // Yes
+            .replace(/\bNo\.?\b/gi, '')                              // No
+            .replace(/Describes ONLY hair\??/gi, '')                  // Describes ONLY hair?
+            .replace(/No banned words\??/gi, '')                      // No banned words?
+            .replace(/3[- ]5 words[^.]*\./gi, '')                     // 3-5 words, lowercase...
+            .replace(/\blowercase\b/gi, '')                          // lowercase
+            .replace(/\bhyphen[- ]separated\b/gi, '')                // hyphen-separated
+            .replace(/\s*[—–-]\s*$/g, '')                            // trailing dashes
+            .replace(/^\s*[—–-]\s*/g, '')                            // leading dashes
+            .replace(/\s{2,}/g, ' ')                                 // multiple spaces
+            .replace(/^[,.;:\s]+|[,.;:\s]+$/g, '')                   // leading/trailing punctuation
+            .trim();
+        }
+
+        function sanitizeImageSEO(seoFilename: string, altText: string, fallbackKw: string, visualDesc?: string): { seoFilename: string; altText: string } {
+          // Clean up template/backtick artifacts
+          seoFilename = cleanAIOutput(seoFilename);
+          altText = cleanAIOutput(altText);
+
+          // Fix generic or placeholder filenames
           const fnBase = seoFilename.replace(/\.[^/.]+$/, '').toLowerCase();
-          const fnIsGeneric = BANNED_FILENAME_RE.test(fnBase) || BANNED_FN_WORDS.some(w => fnBase.includes(w));
-          if (fnIsGeneric) {
-            const cleanWords = altText.toLowerCase()
+          const fnIsGeneric = BANNED_FILENAME_RE.test(fnBase) || BANNED_FN_WORDS.some(w => fnBase.includes(w)) || fnBase.length < 3;
+          if (fnIsGeneric && visualDesc) {
+            // Derive filename from visual description
+            const cleanWords = visualDesc.toLowerCase()
               .replace(/[^a-z0-9\s-]/g, '')
               .split(/\s+/)
-              .filter(w => w.length > 2 && !['the', 'and', 'for', 'with', 'has', 'her', 'his', 'woman', 'girl', 'photo', 'image'].includes(w))
+              .filter(w => w.length > 2 && !['the', 'and', 'for', 'with', 'has', 'her', 'his', 'this', 'that', 'from', 'into', 'woman', 'girl', 'photo', 'image', 'hair', 'style', 'shown'].includes(w))
               .slice(0, 5);
-            seoFilename = cleanWords.length >= 3 ? cleanWords.join('-') + '.jpg' : `${fallbackKw.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-color-technique.jpg`;
+            seoFilename = cleanWords.length >= 3 ? cleanWords.join('-') + '.jpg' : `${fallbackKw.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-technique.jpg`;
           }
 
-          // Strip banned words from alt text
+          // Ensure filename ends with .jpg
+          if (!seoFilename.toLowerCase().endsWith('.jpg') && !seoFilename.toLowerCase().endsWith('.jpeg')) {
+            seoFilename = seoFilename.replace(/\.[^/.]+$/, '') + '.jpg';
+          }
+
+          // Strip banned words from alt text (but NOT 'face' — preserves 'face-framing')
           let clean = altText.replace(BANNED_ALT_RE, '').replace(/\s{2,}/g, ' ').replace(/^[,.\s]+|[,.\s]+$/g, '').replace(/\s*,\s*,/g, ',').trim();
-          if (clean.length < 30) {
-            clean = `${seoFilename.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ')} — ${fallbackKw} inspiration`;
+          if (clean.length < 30 && visualDesc) {
+            // Use visual description as alt text basis
+            clean = visualDesc.substring(0, 140).replace(/\.$/, '') + '.';
+          } else if (clean.length < 30) {
+            clean = `${seoFilename.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ')} hairstyle technique`;
           }
           return { seoFilename, altText: clean };
         }
@@ -756,9 +792,9 @@ ${preAnalyzedImagesText}`;
                 : null;
               
               if (match.useImage !== false && placementIndex !== null) {
-                const rawFn = match.seoFilename || vr.seoFilename;
-                const rawAlt = match.altText || vr.altText;
-                const sanitized = sanitizeImageSEO(rawFn, rawAlt, mainKeyword || 'hair style');
+                const rawFn = match.seoFilename || vr.seoFilename || '';
+                const rawAlt = match.altText || vr.altText || '';
+                const sanitized = sanitizeImageSEO(rawFn, rawAlt, mainKeyword || 'hair style', vr.visualDescription);
                 finalImageMatches.push({
                   id: vr.id,
                   originalName: vr.originalName,
@@ -809,9 +845,9 @@ ${preAnalyzedImagesText}`;
             
             const match = parsedData.imageMatches?.find((m: any) => m.id === vr.id || m.originalName === vr.originalName);
 
-            const rawFn = match?.seoFilename || vr.seoFilename;
-            const rawAlt = match?.altText || vr.altText || `${mainKeyword} - hair view ${idx + 1}`;
-            const sanitized = sanitizeImageSEO(rawFn, rawAlt, mainKeyword || 'hair style');
+            const rawFn = match?.seoFilename || vr.seoFilename || '';
+            const rawAlt = match?.altText || vr.altText || vr.visualDescription || `${mainKeyword} hair technique ${idx + 1}`;
+            const sanitized = sanitizeImageSEO(rawFn, rawAlt, mainKeyword || 'hair style', vr.visualDescription);
 
             finalImageMatches.push({
               id: vr.id,

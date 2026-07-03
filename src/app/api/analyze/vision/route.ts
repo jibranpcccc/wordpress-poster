@@ -6,51 +6,6 @@ import { db } from '@/lib/db';
 export const maxDuration = 10;
 export const dynamic = 'force-dynamic';
 
-// Post-processing: Validate and sanitize vision AI outputs
-const BANNED_FILENAME_PATTERNS = /^(hair-style|long-hair-style|short-hair-style|hairstyle-woman|hairstyle-photo|woman-hairstyle|hair-style-woman|medium-hair-style)/i;
-const GENERIC_FILENAME_PARTS = ['woman', 'photo', 'image', 'picture', 'girl', 'model', 'style-woman'];
-const BANNED_ALT_WORDS = ['woman', 'girl', 'man', 'person', 'model', 'client', 'shirt', 'sweater', 'blouse', 'dress', 'earrings', 'necklace', 'hair tie', 'sitting', 'standing', 'selfie', 'posing', 'wearing', 'room', 'bed', 'bedroom', 'chair', 'mirror', 'wall', 'background', 'sofa', 'window', 'photo', 'image', 'picture', 'face', 'smile', 'eyes', 'green shirt', 'blue shirt', 'taking a selfie', 'in front of'];
-
-function sanitizeVisionOutput(seoFilename: string, altText: string, mainKeyword: string): { seoFilename: string; altText: string } {
-  // Validate filename: reject if generic
-  const fnameBase = seoFilename.replace(/\.[^/.]+$/, '').toLowerCase();
-  const isGeneric = BANNED_FILENAME_PATTERNS.test(fnameBase) || GENERIC_FILENAME_PARTS.some(p => fnameBase.includes(p));
-  if (isGeneric) {
-    // Try to derive a better filename from the alt text
-    const words = altText.toLowerCase()
-      .replace(/[^a-z0-9\s-]/g, '')
-      .split(/\s+/)
-      .filter(w => w.length > 2 && !['the', 'and', 'for', 'with', 'has', 'her', 'his'].includes(w))
-      .slice(0, 5);
-    if (words.length >= 3) {
-      seoFilename = words.join('-') + '.jpg';
-    } else {
-      const kwSlug = (mainKeyword || 'hair-style').toLowerCase().replace(/[^a-z0-9]+/g, '-');
-      seoFilename = `${kwSlug}-color-technique.jpg`;
-    }
-  }
-
-  // Sanitize alt text: remove sentences containing banned words
-  let cleanAlt = altText;
-  for (const banned of BANNED_ALT_WORDS) {
-    const regex = new RegExp(`\\b${banned.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-    if (regex.test(cleanAlt)) {
-      // Remove the banned word and surrounding context
-      cleanAlt = cleanAlt.replace(regex, '').replace(/\s{2,}/g, ' ').trim();
-    }
-  }
-  // Clean up any trailing/leading commas or periods from removal
-  cleanAlt = cleanAlt.replace(/^[,.\s]+|[,.\s]+$/g, '').replace(/\s*,\s*,/g, ',').trim();
-
-  // If alt text was gutted, use the seoFilename stem as fallback
-  if (cleanAlt.length < 30) {
-    const stem = seoFilename.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
-    cleanAlt = `${stem} — ${mainKeyword || 'hairstyle'} inspiration`;
-  }
-
-  return { seoFilename, altText: cleanAlt };
-}
-
 function getGeminiKeys(): string[] {
   const keys: string[] = [];
   for (let i = 1; i <= 50; i++) {
@@ -62,7 +17,6 @@ function getGeminiKeys(): string[] {
 
 const GEMINI_KEYS = getGeminiKeys();
 
-// Helper to shuffle / load Cloudflare keys
 function getCloudflareCredentials() {
   const creds: { key: string; acc: string; index: number }[] = [];
   for (let i = 1; i <= 150; i++) {
@@ -75,8 +29,21 @@ function getCloudflareCredentials() {
   return creds;
 }
 
-// Cloudflare Workers AI Llava
-async function analyzeImageWithCloudflare(
+// Strip markdown artifacts from vision model output
+function cleanVisionText(text: string): string {
+  return text
+    .replace(/^```[a-z]*\n?/gm, '')   // opening code fences
+    .replace(/\n?```$/gm, '')           // closing code fences
+    .replace(/^[`]+|[`]+$/g, '')        // leading/trailing backticks
+    .replace(/^\*+\s*/gm, '')           // bullet asterisks
+    .replace(/^#+\s*/gm, '')            // heading hashes
+    .replace(/\*\*/g, '')               // bold markers
+    .replace(/\n{3,}/g, '\n\n')         // excessive newlines
+    .trim();
+}
+
+// Cloudflare Gemma-4 Vision — SIMPLE hair description only
+async function describeHairWithCloudflare(
   img: { id: string; originalName: string; base64: string; ext: string },
   mainKeyword?: string
 ) {
@@ -87,7 +54,7 @@ async function analyzeImageWithCloudflare(
 
   const creds = getCloudflareCredentials();
   if (creds.length === 0) {
-    throw new Error("No Cloudflare credentials found in environment variables");
+    throw new Error("No Cloudflare credentials found");
   }
 
   const startIdx = Math.floor(Math.random() * creds.length);
@@ -96,59 +63,18 @@ async function analyzeImageWithCloudflare(
   const mimeType = img.ext === 'png' ? 'image/png' : img.ext === 'webp' ? 'image/webp' : 'image/jpeg';
   const dataUrl = `data:${mimeType};base64,${base64Data}`;
 
-  const kw = mainKeyword || "Hair Style";
-  const prompt = `Analyze this hairstyle image for image SEO. Focus ONLY on the hair visible in this image.
+  // SIMPLE prompt — just describe what you see. No SEO, no formatting rules.
+  const prompt = `Describe ONLY the hair visible in this image in 2-3 short sentences.
 
-Focus keyword: "${kw}"
+Focus on: hair length, texture, color, highlights, lowlights, balayage, foils, toner, gloss, cut style, layers, curls, braids, regrowth, gray blending, color placement, face-framing, dimension.
 
-Your job is to generate exactly:
-One short SEO filename.
-One search-optimized SEO alt text.
+Do NOT mention: people, faces, expressions, clothing, accessories, background, room, furniture, camera, or poses. Only describe the hair itself.
 
-CRITICAL RULES — WHAT TO IGNORE (ABSOLUTE BAN LIST):
-You MUST NOT mention ANY of the following in the filename or alt text:
-- Clothing: shirt, sweater, blouse, jacket, dress, top, outfit, green shirt, blue shirt
-- Accessories: earrings, necklace, hair tie, colorful hair tie, glasses, hat
-- Body/Face: woman, girl, man, person, model, client, subject, face, smile, eyes, skin, hands
-- Poses/Actions: sitting, standing, selfie, taking a photo, posing, looking, wearing
-- Environment: room, bed, bedroom, chair, mirror, wall, background, sofa, window, outdoor, indoor
-- Camera: photo, image, picture, shot, camera
-If you mention ANY banned word above, your response is INVALID.
-
-WHAT TO DESCRIBE (REQUIRED — HAIR ONLY):
-Analyze and describe ONLY these visible hair properties:
-- Hair length (long, medium, short, shoulder-length, chin-length)
-- Hair texture (straight, wavy, curly, coily, fine, thick, coarse)
-- Hair color (blonde, brunette, auburn, copper, black, gray, platinum, ombre, balayage)
-- Color technique (highlights, lowlights, foils, babylights, color melt, shadow root, gloss, toner)
-- Cut/Style (layers, bob, pixie, bangs, face-framing, stacked, blunt cut, shag)
-- Color placement (face-framing, crown, mid-lengths, ends, root blend, regrowth line)
-- Condition (glossy, matte, dimensional, blended, seamless, natural-looking)
-
-FILENAME RULES:
-3-5 words only, lowercase, hyphen-separated, ending in .jpg.
-Must describe the specific hairstyle, color, or technique visible.
-BAD examples: hair-style.jpg, long-hair-style.jpg, woman-hairstyle.jpg, hairstyle-photo.jpg
-GOOD examples: copper-balayage-face-framing.jpg, gray-blending-demi-permanent.jpg, curly-dimensional-highlights.jpg
-Naturally include "${kw}" or a related term only if it fits the visible hair.
-
-ALT TEXT RULES:
-80-140 characters ideal.
-Must describe ONLY the visible hair and its SEO-relevant properties.
-GOOD: "Soft copper balayage with face-framing highlights on medium-length wavy hair"
-GOOD: "Dark brunette hair with seamless gray blending using demi-permanent color"
-BAD: "A woman with long dark hair wearing a green shirt" (mentions woman, clothing)
-BAD: "A woman taking a selfie showing her short hairstyle" (mentions woman, selfie)
-Do not keyword stuff. Naturally integrate "${kw}" only if it fits.
-
-You MUST respond exactly in this format:
-
-Filename: [seo-filename].jpg
-Alt Text: [SEO alt text]`;
+Example: "Shoulder-length wavy brunette hair with golden balayage highlights through mid-lengths and ends. Soft face-framing layers add dimension. Natural root shadow blends into warm caramel tones."`;
 
   for (const cred of ordered) {
     try {
-      console.log(`[Cloudflare Vision API] Analyzing "${img.originalName}" trying Key #${cred.index} from pool...`);
+      console.log(`[Vision] Describing hair in "${img.originalName}" via Cloudflare Key #${cred.index}...`);
       const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/@cf/google/gemma-4-26b-a4b-it`;
       const res = await fetch(url, {
         method: 'POST',
@@ -166,67 +92,40 @@ Alt Text: [SEO alt text]`;
               ]
             }
           ],
-          max_tokens: 1024
+          max_tokens: 512
         }),
-        signal: AbortSignal.timeout(90000)
+        signal: AbortSignal.timeout(45000)
       });
 
       if (res.status === 200) {
         const data = await res.json();
         const choices = data.result?.choices || data.choices;
-        const desc = (choices?.[0]?.message?.content || choices?.[0]?.message?.reasoning || choices?.[0]?.text || '').trim();
-        if (desc) {
-          const filenameMatch = desc.match(/Filename:\s*([^\r\n]+)/i);
-          const altMatch = desc.match(/Alt\s*Text:\s*([^\r\n]+)/i);
-          
-          let seoFilename = '';
-          let altText = '';
-          
-          if (filenameMatch) {
-            seoFilename = filenameMatch[1].trim();
-          }
-          if (altMatch) {
-            altText = altMatch[1].trim();
-          }
-
-          // Fallbacks if parse failed
-          if (!seoFilename) {
-            const kwSlug = (mainKeyword || 'hair-style').toLowerCase().replace(/[^a-z0-9]+/g, '-');
-            seoFilename = `${kwSlug}-image.jpg`;
-          }
-          if (!altText) {
-            altText = `${mainKeyword || 'Hair style'} hair highlights visual check.`;
-          }
-
-          // Force .jpg extension
-          if (!seoFilename.toLowerCase().endsWith('.jpg') && !seoFilename.toLowerCase().endsWith('.jpeg')) {
-            seoFilename = seoFilename.split('.')[0] + '.jpg';
-          }
-
-          // Post-process: sanitize AI output to ensure hair-only focus
-          const sanitized = sanitizeVisionOutput(seoFilename, altText, mainKeyword || 'Hair Style');
-          seoFilename = sanitized.seoFilename;
-          altText = sanitized.altText;
-
+        const desc = (choices?.[0]?.message?.content || choices?.[0]?.text || '').trim();
+        if (desc && desc.length > 10) {
+          const cleaned = cleanVisionText(desc);
+          console.log(`[Vision] Got description for "${img.originalName}": ${cleaned.substring(0, 80)}...`);
           return {
             id: img.id,
             originalName: img.originalName,
-            seoFilename,
-            altText,
+            visualDescription: cleaned,
+            seoFilename: '',
+            altText: '',
             caption: ''
           };
         }
+      } else {
+        console.warn(`[Vision] Cloudflare Key #${cred.index} returned status ${res.status}`);
       }
     } catch (e: any) {
-      console.warn(`Cloudflare vision key #${cred.index} error: ${e.message}`);
+      console.warn(`[Vision] Cloudflare Key #${cred.index} error: ${e.message}`);
     }
   }
 
-  throw new Error("All Cloudflare Worker AI vision keys failed");
+  throw new Error("All Cloudflare vision keys failed");
 }
 
-// Gemini Vision API Fallback
-async function analyzeImageWithGemini(
+// Gemini Vision Fallback — same simple description prompt
+async function describeHairWithGemini(
   img: { id: string; originalName: string; base64: string; ext: string },
   customGeminiKey: string | null,
   mainKeyword?: string
@@ -241,36 +140,16 @@ async function analyzeImageWithGemini(
     throw new Error("No Gemini keys found");
   }
 
-  // Shuffle keys
   const start = Math.floor(Math.random() * keys.length);
   const orderedKeys = [...keys.slice(start), ...keys.slice(0, start)];
 
   const mimeType = img.ext === 'png' ? 'image/png' : img.ext === 'webp' ? 'image/webp' : 'image/jpeg';
-  const kw = mainKeyword || "Hair Style";
-  const promptText = `Analyze this hairstyle image for image SEO. Focus ONLY on the visible hair.
 
-Focus keyword: "${kw}"
-
-Generate:
-1. SEO filename: 3-5 words, lowercase, hyphen-separated, describing the hair color/technique/style, ending in .jpg.
-   BAD: hair-style.jpg, long-hair-style.jpg, woman-hairstyle.jpg
-   GOOD: copper-balayage-face-framing.jpg, gray-blending-demi-permanent.jpg
-2. Search-optimized Alt Text: 80-140 characters describing ONLY the hair.
-   BAD: "A woman with long dark hair wearing a green shirt" (mentions woman, clothing)
-   GOOD: "Soft copper balayage with face-framing highlights on medium-length wavy hair"
-3. Short Caption under 60 chars about the hair technique/style.
-
-ABSOLUTE BAN LIST — Do NOT mention any of these:
-woman, girl, man, person, model, client, shirt, sweater, blouse, dress, earrings, necklace, hair tie, sitting, standing, selfie, posing, wearing, room, bed, chair, mirror, wall, background, photo, image, picture, face, smile, eyes.
-
-ONLY describe: hair length, texture, color, highlights, lowlights, foils, toner, gloss, cut, layers, curls, regrowth, placement, dimension, gray blending.
-
-You MUST respond strictly in valid JSON format:
-{"seoFilename": "...", "altText": "...", "caption": "..."}`;
+  const promptText = `Describe ONLY the hair visible in this image in 2-3 short sentences. Focus on hair length, texture, color, highlights, lowlights, balayage, foils, toner, gloss, cut style, layers, curls, braids, regrowth, gray blending, color placement, face-framing, dimension. Do NOT mention people, faces, clothing, accessories, background, room, or camera. Only describe the hair.`;
 
   for (const apiKey of orderedKeys) {
     try {
-      console.log(`[Gemini Vision API] Analyzing "${img.originalName}"...`);
+      console.log(`[Vision] Describing hair in "${img.originalName}" via Gemini...`);
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
       const res = await fetch(url, {
         method: 'POST',
@@ -288,51 +167,28 @@ You MUST respond strictly in valid JSON format:
                 }
               ]
             }
-          ],
-          generationConfig: {
-            responseMimeType: "application/json"
-          }
+          ]
         }),
-        signal: AbortSignal.timeout(12000)
+        signal: AbortSignal.timeout(15000)
       });
 
       if (res.status === 200) {
         const result = await res.json();
         const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (text) {
-          const parsed = JSON.parse(text.trim());
-          let seoFilename = parsed.seoFilename || '';
-          let altText = parsed.altText || '';
-          let caption = parsed.caption || '';
-
-          if (!seoFilename) {
-            const kwSlug = (mainKeyword || 'hair-style').toLowerCase().replace(/[^a-z0-9]+/g, '-');
-            seoFilename = `${kwSlug}-image.jpg`;
-          }
-          if (!altText) {
-            altText = `${mainKeyword || 'Hair style'} hairstyle view.`;
-          }
-
-          if (!seoFilename.toLowerCase().endsWith('.jpg') && !seoFilename.toLowerCase().endsWith('.jpeg')) {
-            seoFilename = seoFilename.split('.')[0] + '.jpg';
-          }
-
-          // Post-process: sanitize AI output to ensure hair-only focus
-          const sanitized = sanitizeVisionOutput(seoFilename, altText, mainKeyword || 'Hair Style');
-          seoFilename = sanitized.seoFilename;
-          altText = sanitized.altText;
-
+        if (text && text.trim().length > 10) {
+          const cleaned = cleanVisionText(text.trim());
           return {
             id: img.id,
             originalName: img.originalName,
-            seoFilename,
-            altText,
-            caption
+            visualDescription: cleaned,
+            seoFilename: '',
+            altText: '',
+            caption: ''
           };
         }
       }
     } catch (e: any) {
-      console.warn(`Gemini key error: ${e.message}`);
+      console.warn(`[Vision] Gemini key error: ${e.message}`);
     }
   }
 
@@ -353,7 +209,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Image details are required' }, { status: 400 });
     }
 
-    console.log(`[Vision API] Received analysis request for image "${image.originalName}"...`);
+    console.log(`[Vision] Received request for "${image.originalName}"...`);
 
     // Prepare image base64
     let base64Data = '';
@@ -403,28 +259,30 @@ export async function POST(request: Request) {
       ext
     };
 
-    // Run Cloudflare Vision LLava or Gemini
+    // Run Cloudflare Gemma-4 vision or Gemini fallback
     if (visionProvider === 'cloudflare') {
       try {
-        const res = await analyzeImageWithCloudflare(imgObj, mainKeyword);
+        const res = await describeHairWithCloudflare(imgObj, mainKeyword);
         return NextResponse.json(res);
       } catch (cfErr: any) {
-        console.warn(`Cloudflare vision failed on endpoint, falling back to Gemini: ${cfErr.message}`);
+        console.warn(`[Vision] Cloudflare failed, falling back to Gemini: ${cfErr.message}`);
       }
     }
 
     // Fallback to Gemini
-    const res = await analyzeImageWithGemini(imgObj, customGeminiKey, mainKeyword);
+    const res = await describeHairWithGemini(imgObj, customGeminiKey, mainKeyword);
     return NextResponse.json(res);
 
   } catch (e: any) {
-    console.error("[Vision API Route Error]:", e);
-    const kwSlug = (mainKeyword || 'hair-style').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    console.error("[Vision Route Error]:", e);
+    // Return a descriptive fallback based on original filename
+    const cleanStem = (image?.originalName || 'image').replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ').replace(/\d{10,}/g, '').trim();
     const fallback = {
       id: image?.id || 'img_err',
       originalName: image?.originalName || 'image.jpg',
-      seoFilename: `${kwSlug}-example.jpg`,
-      altText: `${mainKeyword || 'Hair style'} hair view.`,
+      visualDescription: `Hair style shown in ${cleanStem || 'uploaded photo'}.`,
+      seoFilename: '',
+      altText: '',
       caption: '',
       error: e.message
     };
