@@ -28,7 +28,7 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
   const [category, setCategory] = useState('');
   const [tags, setTags] = useState('');
   const [articleContent, setArticleContent] = useState('');
-  const [model, setModel] = useState('cloudflare-glm');
+  const [model, setModel] = useState('claude-sonnet-5');
   const [visionProvider, setVisionProvider] = useState('cloudflare');
   
   // Custom SEO states
@@ -109,16 +109,78 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
     }
   };
 
+  // Downscale and compress image client-side to make uploads 10x faster and prevent server timeouts
+  const compressImage = (file: File, maxWidth = 1000, maxHeight = 1000, quality = 0.85): Promise<Blob | File> => {
+    return new Promise((resolve) => {
+      if (!file.type.startsWith('image/')) {
+        resolve(file);
+        return;
+      }
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > maxWidth) {
+              height = Math.round((height * maxWidth) / width);
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width = Math.round((width * maxHeight) / height);
+              height = maxHeight;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          canvas.toBlob(
+            (blob) => {
+              resolve(blob || file);
+            },
+            file.type || 'image/jpeg',
+            quality
+          );
+        };
+        img.onerror = () => resolve(file);
+      };
+      reader.onerror = () => resolve(file);
+    });
+  };
+
   // Handle images upload
   const handleImagesUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     
     setIsUploadingImages(true);
     const formData = new FormData();
-    for (let i = 0; i < files.length; i++) {
-      formData.append('files', files[i]);
+    
+    // Process and compress all images in parallel
+    try {
+      const compressPromises = Array.from(files).map(async (file) => {
+        const compressedBlob = await compressImage(file);
+        // Retain original name but wrap in File constructor so filename is sent
+        const compressedFile = new File([compressedBlob], file.name, { type: file.type });
+        formData.append('files', compressedFile);
+      });
+      await Promise.all(compressPromises);
+    } catch (compressErr) {
+      console.warn("Client-side compression failed, uploading original files:", compressErr);
+      for (let i = 0; i < files.length; i++) {
+        formData.append('files', files[i]);
+      }
     }
+    
     formData.append('isTextFile', 'false');
+
 
     // Retrieve active WordPress credentials from localStorage
     const wpUrl = localStorage.getItem('wp_active_site_url') || localStorage.getItem('wp_site_url') || '';
@@ -433,14 +495,14 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
               value={model}
               onChange={(e) => setModel(e.target.value)}
               className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-slate-50/30 font-medium text-slate-800"
-            >
-              <option value="deepseek-v4-flash-free">🌟 DeepSeek V4 Flash (Recommended - Smartest & Free)</option>
-              <option value="cloudflare-glm">☁️ Cloudflare Racing (GLM 5.2 - Free & Rotated)</option>
-              <option value="gemini-2.5-flash">♊ Gemini 2.5 Flash (Vision & Text - Free Keys)</option>
-              <option value="gemini-2.5-pro">♊ Gemini 2.5 Pro (Vision & Text - Free Keys)</option>
-              <option value="mimo-v2.5-free">⚡ MiniMax M2.5 Free (Fastest & Free)</option>
-              <option value="big-pickle">🥒 Big Pickle (Large model)</option>
+              <option value="claude-sonnet-5">🤖 Claude 3.5 Sonnet (OpenCode - Best Writing)</option>
+              <option value="deepseek-v4-flash-free">🌟 DeepSeek V4 Flash (OpenCode - Smart & Free)</option>
+              <option value="minimax-m3">⚡ MiniMax M3 (OpenCode - Fast & Smart)</option>
+              <option value="kimi-k2.7-code">💬 Kimi K2.7 Code (OpenCode)</option>
+              <option value="nemotron-3-ultra-free">🚀 Nemotron 3 Ultra Free (OpenCode)</option>
+              <option value="north-mini-code-free">🧭 North Mini Code Free (OpenCode)</option>
             </select>
+
           </div>
 
           <div>

@@ -8,60 +8,17 @@ export const maxDuration = 60; // Max 60s for Netlify Pro (free plan: 10s, handl
 
 
 function getGeminiKeys(): string[] {
-  return [
-    "AIzaSyBwo6SECQ45fo2xucNBOMaFMjvZrRAnBYA",
-    "AIzaSyBZl6na3i0EpnEqReEja9H8sRQ_7Y9q7S4",
-    "AIzaSyAVz3gsnnp5XIAuXf-hWO9S-lcErY4BGOo",
-    "AIzaSyBDXb0ORbXbzK4sXroUHrD4Z4IixFCDp0c",
-    "AIzaSyDkkuW_5BLjFXnLv4rB_l4wFU8NvBAv99Q",
-    "AIzaSyCUznGMx8gPVmn285J-lh2eiuU-jXomDpk",
-    "AIzaSyDX0gZFBVRqZh_s5Kdl4SRqutAssGUlws8",
-    "AIzaSyCiQ-DLrhWSPrY1mZ0nBaZ0QJbb2E4Unlc",
-    "AIzaSyDOE8CTiK25W9LpZdLgb8d2yr94c0-TOM8",
-    "AIzaSyD-suIQxkXxQTWr09_8g2KGZzTpuXlxShw",
-    "AIzaSyDbOUp_E2IbFP5ciwh46h5k-fiqZ8sQAZA",
-    "AIzaSyAZiu5eAQTJaTJ7KB82wKbjQ6ZDACggz_g",
-    "AIzaSyBCsDxRtDwfKYdUFAa2gxp60MAZC831Yn0",
-    "AIzaSyCvH3K7m4AiavfjQoxekPecY3C-EfCF8TQ",
-    "AIzaSyAtb4VetbZI6aGDjjEG92wljfg1s-x8hHA",
-    "AIzaSyB9_Wzmj6ehBaFxJxyOWcmxFjhfgDTSu3E",
-    "AIzaSyBHi8zm6dpfw7suF02_DwkEaM-fcmPGZr4",
-    "AIzaSyD8nPedXWNI8rZWOA292pYRUfO8sl316Pc",
-    "AIzaSyA-coE7j3Hy1JOjRheJXXUmL7Y7aSMijmo",
-    "AIzaSyB-mzLeNkiFfLrDnzlyoVVffz0DhV9E9gg",
-    "AIzaSyAzdmMHxWvENWcMkdnf5aJUw6elktWIah8",
-    "AIzaSyAQmgXDsqVx5Emelc3khKUMpc-wHXW8sLg",
-    "AIzaSyD1VWlkc2WLMocNBTylYg62vIGQG5iULxY",
-    "AIzaSyC9QZlprmjsvqjM3lxCteoCXcjS6EVxNR0",
-    "AIzaSyCCdSQDsYERA9IJ2Sno2bEmXMerCS6To1U",
-    "AIzaSyB9M2TeNrPlQ4XaXlYftzgSuyFJbLSe8e4",
-    "AIzaSyAZsG4hqxSRwbN8aUhzuhkDFpxybwGZlwY",
-    "AIzaSyD0UEZgBhn7YTuFbJYAFJquI1aS92jFgTI",
-    "AIzaSyDSA_LY8VFW7lwfyygHz_UBl_l0CStuEeE",
-    "AIzaSyD0SNf-kWaosjkhj5_tvlk80FkAQi5TXtQ",
-    "AIzaSyAN-SxLvrjM0YDOpRWUtUg3ye5_ysBtNyo",
-    "AIzaSyAy2LAcOq9KzB5cMVAOy1U6D8g5WjUFxlg",
-    "AIzaSyDwNR4Ag3YSkXo4eqN-GOv73U_UXoU3tuU",
-    "AIzaSyDc0kcczH0pOY2CL5ClTdT8HDJ2kQPwmf8",
-    "AIzaSyB3FF3UbMC9Yo4KqUPVbpExDxkThtT4OQQ",
-    "AIzaSyCvLBPhlkaDWrV_qgeqly67uQB9aML7zDE",
-    "AIzaSyB2o5_tHUHxRRCUHRQIAosABrL4IWDLvM4",
-    "AIzaSyDbE99mwONfBZpDRkiCdiMHFBmYHMw7NJI",
-    "AIzaSyAae0UuPKwqusp2DCNz5jE091ynmZ7mnvw",
-    "AIzaSyBNSlM_b4dAjgGuhiTaGG5-rdse1TspVwg",
-    "AIzaSyBVPMnF5yqmS21Wa1UyLGMUrANuL3yn1zU",
-    "AIzaSyA-5mJlsHWrIjQKz52xulpXKXrYM1e3s5M",
-    "AIzaSyBcFugyTMZlECy2ZOYXY-KWsxc-pz8Evvk",
-    "AIzaSyCXdFnslbMrPuAOIVQjS0mQCpet6aE4vwA",
-    "AIzaSyDWjb8mJwGzC1TrkTO7iUPnKdLKVU9gxko",
-    "AIzaSyD1L9-OFCyM7VMD7Sd-3GCYisuw8WFPSlk",
-    "AIzaSyDUOX-f3mTcdPLRmhd0tN8ZJ9c1IV0jLuo",
-    "AIzaSyBMAquxf2-L3ySWlKqpdDictL5OOD3xK9o",
-    "AIzaSyA-msEkECggcnYf64hBh8teqiGpzP9k57I"
-  ];
+  // Load from environment variable (which is in .env, git-ignored)
+  const keys: string[] = [];
+  for (let i = 1; i <= 50; i++) {
+    const k = process.env[`GEMINI_API_KEY_${i}`] || process.env[`GEMINI_API_KEY`];
+    if (k) keys.push(k.trim());
+  }
+  return keys;
 }
 
 const GEMINI_KEYS = getGeminiKeys();
+
 
 function escapeRawNewlinesInJsonString(jsonStr: string): string {
   let result = '';
@@ -381,7 +338,7 @@ function extractFlexibleJson(rawText: string): any {
   }
 }
 
-// Visual analysis using Cloudflare Workers AI Llava 1.5 with rotated keys
+// Visual analysis using Cloudflare Workers AI Llama 3.2 11B Vision with rotated keys and silent auto-license agreement
 async function analyzeImageWithCloudflare(
   img: { id: string; originalName: string; base64: string; ext: string },
   imageIndex: number,
@@ -414,12 +371,11 @@ async function analyzeImageWithCloudflare(
   const imageArray = Array.from(buffer);
 
   const kw = mainKeyword || "Hair Style";
-  const prompt = `Analyze this hairstyle image for image SEO.
+  const prompt = `Analyze this hairstyle image for image SEO. Focus on hair texture, color placement, highlights, lowlights, cut, or style.
 
 Focus keyword: "${kw}"
 
-Your job is to generate:
-
+Your job is to generate exactly:
 One short SEO filename.
 One search-optimized SEO alt text.
 
@@ -1379,52 +1335,31 @@ ${preAnalyzedImagesText}`;
           }
         };
 
-        // Helper: try Cloudflare copywriting with rotated keys
-        const tryCloudflareCopywrite = async () => {
-          if (responseData) return;
-          try {
-            sendProgress(75, `Submitting copywriter request to Cloudflare GLM 5.2 model...`);
-            const rawText = await copywriteWithCloudflare(systemPrompt, userContent);
-            if (rawText) {
-              console.log(`Success with Cloudflare GLM 5.2 copywriting.`);
-              processRawText(rawText, 'cloudflare-glm');
-            }
-          } catch (err: any) {
-            console.warn(`Cloudflare copywriting failed: ${err.message}`);
-            lastError = err;
-          }
-        };
-
         // ── Execute model chain ──
 
-        // 1. If user selected Cloudflare, try it first
-        if (selectedModel === 'cloudflare-glm') {
-          await tryCloudflareCopywrite();
+        // 1. First try the selected OpenCode model (e.g., claude-sonnet-5)
+        if (selectedModel && !selectedModel.startsWith('gemini-') && selectedModel !== 'cloudflare-glm') {
+          await tryOpenCodeModel(selectedModel, 50000); // 50s timeout for high-quality sonnet writing
         }
 
-        // 2. If user selected an OpenCode model, try it first
-        if (!responseData && selectedModel && selectedModel !== 'cloudflare-glm' && !selectedModel.startsWith('gemini-')) {
-          const normalizedModel = selectedModel === 'deepseek-v4-flash-free' ? 'deepseek-v4-flash' : selectedModel;
-          await tryOpenCodeModel(normalizedModel, 45000);
-        }
-
-        // 3. Fall back to other models (including Cloudflare if not tried yet, and OpenCode text models)
+        // 2. If it failed or wasn't run, fall back to other OpenCode models
         if (!responseData) {
-          // If Cloudflare was not the primary selected model, try it as the first fallback since it has 101 keys
-          if (selectedModel !== 'cloudflare-glm') {
-            await tryCloudflareCopywrite();
-          }
-          
-          if (!responseData) {
-            const selectedNormalized = selectedModel === 'deepseek-v4-flash-free' ? 'deepseek-v4-flash' : (selectedModel?.startsWith('gemini-') ? null : selectedModel);
-            for (const model of ['mimo-v2.5-free', 'big-pickle', 'deepseek-v4-flash']) {
-              if (responseData) break;
-              if (model !== selectedNormalized) {
-                await tryOpenCodeModel(model, 45000);
-              }
+          const fallbackModels = [
+            'claude-sonnet-5',
+            'deepseek-v4-flash-free',
+            'minimax-m3',
+            'kimi-k2.7-code',
+            'nemotron-3-ultra-free',
+            'north-mini-code-free'
+          ];
+          for (const model of fallbackModels) {
+            if (responseData) break;
+            if (model !== selectedModel) {
+              await tryOpenCodeModel(model, 45000);
             }
           }
         }
+
 
         if (!responseData) {
           console.warn("All text models failed. Generating local default/fallback SEO and formatting data...");
