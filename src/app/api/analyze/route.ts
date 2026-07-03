@@ -430,7 +430,7 @@ Alt Text: [SEO alt text]`;
   for (const cred of ordered) {
     try {
       console.log(`[Cloudflare Vision] Analyzing "${img.originalName}" trying Key #${cred.index} from pool...`);
-      const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/@cf/llava-hf/llava-1.5-7b-hf`;
+      const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/@cf/google/gemma-4-26b-a4b-it`;
       const res = await fetch(url, {
         method: 'POST',
         headers: {
@@ -1580,21 +1580,33 @@ ${preAnalyzedImagesText}`;
         }
 
         sendProgress(100, "Done! Formatting successful.");
-        controller.enqueue(encoder.encode(JSON.stringify({
-          type: 'success',
-          modelUsed: successModel,
-          data: responseData
-        }) + '\n'));
+        if (!request.signal.aborted) {
+          try {
+            controller.enqueue(encoder.encode(JSON.stringify({
+              type: 'success',
+              modelUsed: successModel,
+              data: responseData
+            }) + '\n'));
+          } catch (enqueueErr) {}
+        }
         
       } catch (e: any) {
         console.error("Analysis stream error:", e);
-        controller.enqueue(encoder.encode(JSON.stringify({
-          type: 'error',
-          error: e.message || 'Failed to analyze post'
-        }) + '\n'));
+        if (!request.signal.aborted) {
+          try {
+            controller.enqueue(encoder.encode(JSON.stringify({
+              type: 'error',
+              error: e.message || 'Failed to analyze post'
+            }) + '\n'));
+          } catch (enqueueErr) {}
+        }
       } finally {
         clearInterval(heartbeat);
-        controller.close();
+        if (!request.signal.aborted) {
+          try {
+            controller.close();
+          } catch (closeErr) {}
+        }
       }
 
     }

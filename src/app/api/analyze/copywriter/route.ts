@@ -865,15 +865,31 @@ ${preAnalyzedImagesText}`;
         }));
 
         logDebug("Formatting and image distribution completed successfully. Returning streaming success.");
-        controller.enqueue(encoder.encode(JSON.stringify({ type: 'success', data: parsedData }) + '\n'));
-        clearInterval(heartbeat);
-        controller.close();
+        if (!request.signal.aborted) {
+          try {
+            controller.enqueue(encoder.encode(JSON.stringify({ type: 'success', data: parsedData }) + '\n'));
+          } catch (enqueueErr) {}
+          clearInterval(heartbeat);
+          try {
+            controller.close();
+          } catch (closeErr) {}
+        } else {
+          clearInterval(heartbeat);
+        }
 
       } catch (e: any) {
         logDebug(`CRITICAL ERROR in copywriter endpoint: ${e.message}\nStack: ${e.stack}`);
-        controller.enqueue(encoder.encode(JSON.stringify({ type: 'error', error: e.message }) + '\n'));
-        clearInterval(heartbeat);
-        controller.close();
+        if (!request.signal.aborted) {
+          try {
+            controller.enqueue(encoder.encode(JSON.stringify({ type: 'error', error: e.message }) + '\n'));
+          } catch (enqueueErr) {}
+          clearInterval(heartbeat);
+          try {
+            controller.close();
+          } catch (closeErr) {}
+        } else {
+          clearInterval(heartbeat);
+        }
       }
     }
   });

@@ -149,7 +149,7 @@ Alt Text: [SEO alt text]`;
   for (const cred of ordered) {
     try {
       console.log(`[Cloudflare Vision API] Analyzing "${img.originalName}" trying Key #${cred.index} from pool...`);
-      const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/@cf/llava-hf/llava-1.5-7b-hf`;
+      const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/@cf/google/gemma-4-26b-a4b-it`;
       const res = await fetch(url, {
         method: 'POST',
         headers: {
