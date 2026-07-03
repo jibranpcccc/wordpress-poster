@@ -68,8 +68,20 @@ function getFirebaseDb(): any {
   isFirebaseInitialized = true;
 
   try {
-    const serviceAccountStr = process.env.FIREBASE_SERVICE_ACCOUNT;
-    if (!serviceAccountStr) return null;
+    let serviceAccountStr = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (!serviceAccountStr) {
+      console.warn('[DB] No FIREBASE_SERVICE_ACCOUNT env var found.');
+      return null;
+    }
+
+    // Clean wrapping quotes that could be added during import
+    serviceAccountStr = serviceAccountStr.trim();
+    if (serviceAccountStr.startsWith("'") && serviceAccountStr.endsWith("'")) {
+      serviceAccountStr = serviceAccountStr.slice(1, -1);
+    }
+    if (serviceAccountStr.startsWith('"') && serviceAccountStr.endsWith('"')) {
+      serviceAccountStr = serviceAccountStr.slice(1, -1);
+    }
 
     const serviceAccount = JSON.parse(serviceAccountStr);
     if (getApps().length === 0) {
@@ -77,13 +89,18 @@ function getFirebaseDb(): any {
     }
     firestoreDb = getFirestore();
     console.log('[DB] Firebase Firestore initialized successfully.');
-  } catch (e) {
-    console.error('[DB] Failed to initialize Firebase:', e);
+  } catch (e: any) {
+    console.error('[DB] Failed to initialize Firebase:', e.message);
     firestoreDb = null;
+    // On Netlify/production, throw so that we don't silently fail and crash with EROFS later
+    if (process.env.NETLIFY || process.env.NODE_ENV === 'production') {
+      throw new Error(`Firebase Initialization Error: ${e.message}`);
+    }
   }
 
   return firestoreDb;
 }
+
 
 export const db = {
   getProjects: async (): Promise<Project[]> => {
@@ -223,8 +240,13 @@ export const db = {
         console.error(`[DB] Failed to save image asset ${id} to Firestore:`, e);
         throw e;
       }
+    } else {
+      if (process.env.NETLIFY || process.env.NODE_ENV === 'production') {
+        throw new Error("Firebase Firestore is not initialized. Cannot save image assets on serverless platform.");
+      }
     }
   },
+
 
   getImage: async (id: string): Promise<{ base64Data: string; contentType: string } | null> => {
     const fDb = getFirebaseDb();

@@ -13,7 +13,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No files uploaded" }, { status: 400 });
     }
 
+    const isProduction = process.env.NETLIFY || process.env.NODE_ENV === 'production';
     const hasFirebase = !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_PROJECT_ID);
+
+    if (isProduction && !hasFirebase) {
+      throw new Error("Missing FIREBASE_SERVICE_ACCOUNT environment variable. Firestore persistence is required on serverless platforms.");
+    }
 
     const uploadPromises = files.map(async (file) => {
       const arrayBuffer = await file.arrayBuffer();
@@ -36,13 +41,17 @@ export async function POST(request: Request) {
           console.log(`[Upload API] Saved "${file.name}" to Firestore as "${uniqueName}"`);
           return { originalName: file.name, localPath: `/api/image?id=${uniqueName}`, size: file.size };
         } catch (fbErr: any) {
-          console.warn(`[Upload API] Firestore save failed for "${file.name}", falling back to disk:`, fbErr.message);
+          console.error(`[Upload API Error] Firestore save failed:`, fbErr.message);
+          if (isProduction) {
+            throw new Error(`Firestore Upload Failed: ${fbErr.message}`);
+          }
         }
       }
 
-      // LOCAL PATH: Save to disk for local development
+      // LOCAL PATH: Save to disk for local development (only local)
       const uploadDir = path.join(process.cwd(), "public", "uploads");
       try {
+
         if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
         fs.writeFileSync(path.join(uploadDir, uniqueName), buffer);
         try { fs.writeFileSync(path.join(uploadDir, file.name), buffer); } catch (e) {}
