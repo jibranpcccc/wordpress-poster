@@ -4,7 +4,8 @@ import path from 'path';
 import { getOpenCodeClient, getApiKey } from '@/lib/opencode-client';
 import { db } from '@/lib/db';
 
-export const maxDuration = 300; // Allow execution for up to 5 minutes
+export const maxDuration = 60; // Max 60s for Netlify Pro (free plan: 10s, handled by streaming)
+
 
 function getGeminiKeys(): string[] {
   return [
