@@ -85,11 +85,12 @@ export default function Home() {
             <span className="font-extrabold text-base tracking-tight">Smart Poster</span>
           </div>
           <div className="flex items-center gap-3 text-xs text-slate-400">
-            <span>Local Environment</span>
+            <span>{process.env.NODE_ENV === 'production' ? 'Live' : 'Local Environment'}</span>
             <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-ping"></span>
           </div>
         </div>
       </header>
+
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-8">

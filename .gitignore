@@ -48,3 +48,15 @@ src/data/projects/
 
 # Gemini keys json file
 gemini_keys.json
+
+# Deploy artifacts
+deploy.tar
+deploy_flat.tar
+deploy_package/
+
+# One-off scripts
+ssh_npm_install.js
+cpanel_browser.js
+
+# Uploaded images (uploaded per-session)
+public/uploads/

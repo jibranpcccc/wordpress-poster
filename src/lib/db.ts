@@ -64,7 +64,25 @@ let firestoreDb: any = null;
 let isFirebaseInitialized = false;
 
 function getFirebaseDb(): any {
-  return null; // Always local flat-files, Firebase disabled
+  if (isFirebaseInitialized) return firestoreDb;
+  isFirebaseInitialized = true;
+
+  try {
+    const serviceAccountStr = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (!serviceAccountStr) return null;
+
+    const serviceAccount = JSON.parse(serviceAccountStr);
+    if (getApps().length === 0) {
+      initializeApp({ credential: cert(serviceAccount) });
+    }
+    firestoreDb = getFirestore();
+    console.log('[DB] Firebase Firestore initialized successfully.');
+  } catch (e) {
+    console.error('[DB] Failed to initialize Firebase:', e);
+    firestoreDb = null;
+  }
+
+  return firestoreDb;
 }
 
 export const db = {
