@@ -28,7 +28,7 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
   const [category, setCategory] = useState('');
   const [tags, setTags] = useState('');
   const [articleContent, setArticleContent] = useState('');
-  const [model, setModel] = useState('claude-sonnet-5');
+  const [model, setModel] = useState('deepseek-v4-flash-free');
   const [visionProvider, setVisionProvider] = useState('cloudflare');
   
   // Custom SEO states
@@ -495,13 +495,12 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
               value={model}
               onChange={(e) => setModel(e.target.value)}
               className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-slate-50/30 font-medium text-slate-800"
-              <option value="claude-sonnet-5">🤖 Claude 3.5 Sonnet (OpenCode - Best Writing)</option>
-              <option value="deepseek-v4-flash-free">🌟 DeepSeek V4 Flash (OpenCode - Smart & Free)</option>
-              <option value="minimax-m3">⚡ MiniMax M3 (OpenCode - Fast & Smart)</option>
-              <option value="kimi-k2.7-code">💬 Kimi K2.7 Code (OpenCode)</option>
-              <option value="nemotron-3-ultra-free">🚀 Nemotron 3 Ultra Free (OpenCode)</option>
-              <option value="north-mini-code-free">🧭 North Mini Code Free (OpenCode)</option>
+            >
+              <option value="deepseek-v4-flash-free">🌟 DeepSeek V4 Flash (OpenCode - Free & Smart)</option>
+              <option value="nemotron-3-ultra-free">🚀 Nemotron 3 Ultra (OpenCode - Free)</option>
+              <option value="north-mini-code-free">🧭 North Mini Code (OpenCode - Free)</option>
             </select>
+
 
           </div>
 

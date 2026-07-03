@@ -1337,18 +1337,15 @@ ${preAnalyzedImagesText}`;
 
         // ── Execute model chain ──
 
-        // 1. First try the selected OpenCode model (e.g., claude-sonnet-5)
+        // 1. First try the selected OpenCode model (e.g., deepseek-v4-flash-free)
         if (selectedModel && !selectedModel.startsWith('gemini-') && selectedModel !== 'cloudflare-glm') {
-          await tryOpenCodeModel(selectedModel, 50000); // 50s timeout for high-quality sonnet writing
+          await tryOpenCodeModel(selectedModel, 45000);
         }
 
-        // 2. If it failed or wasn't run, fall back to other OpenCode models
+        // 2. If it failed or wasn't run, fall back to other free OpenCode models
         if (!responseData) {
           const fallbackModels = [
-            'claude-sonnet-5',
             'deepseek-v4-flash-free',
-            'minimax-m3',
-            'kimi-k2.7-code',
             'nemotron-3-ultra-free',
             'north-mini-code-free'
           ];
@@ -1359,6 +1356,7 @@ ${preAnalyzedImagesText}`;
             }
           }
         }
+
 
 
         if (!responseData) {
