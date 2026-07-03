@@ -1,0 +1,28 @@
+name: Deploy to Netlify
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy to Netlify
+        run: npx netlify-cli deploy --build --prod
+        env:
+          NETLIFY_AUTH_TOKEN: nfc_P8ub7vnkrK7CymNPa8j1UH5t8sSS6i35ce78
+          NETLIFY_SITE_ID: a0cf9c3c-4b57-4ba2-a9ed-d1a45af84965
