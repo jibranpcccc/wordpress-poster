@@ -161,26 +161,6 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
     if (!files || files.length === 0) return;
     
     setIsUploadingImages(true);
-    const formData = new FormData();
-    
-    // Process and compress all images in parallel
-    try {
-      const compressPromises = Array.from(files).map(async (file) => {
-        const compressedBlob = await compressImage(file);
-        // Retain original name but wrap in File constructor so filename is sent
-        const compressedFile = new File([compressedBlob], file.name, { type: file.type });
-        formData.append('files', compressedFile);
-      });
-      await Promise.all(compressPromises);
-    } catch (compressErr) {
-      console.warn("Client-side compression failed, uploading original files:", compressErr);
-      for (let i = 0; i < files.length; i++) {
-        formData.append('files', files[i]);
-      }
-    }
-    
-    formData.append('isTextFile', 'false');
-
 
     // Retrieve active WordPress credentials from localStorage
     const wpUrl = localStorage.getItem('wp_active_site_url') || localStorage.getItem('wp_site_url') || '';
@@ -198,30 +178,55 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
       } catch (e) {}
     }
 
-    if (wpUrl && wpUser && wpPassword) {
-      formData.append('wpUrl', wpUrl);
-      formData.append('wpUser', wpUser);
-      formData.append('wpPassword', wpPassword);
-    }
+    const uploadFile = async (file: File) => {
+      let finalFile: File = file;
+      try {
+        const compressedBlob = await compressImage(file);
+        finalFile = new File([compressedBlob], file.name, { type: file.type });
+      } catch (compressErr) {
+        console.warn("Client-side compression failed for file:", file.name, compressErr);
+      }
 
-    try {
+      const fd = new FormData();
+      fd.append('files', finalFile);
+      fd.append('isTextFile', 'false');
+      if (wpUrl && wpUser && wpPassword) {
+        fd.append('wpUrl', wpUrl);
+        fd.append('wpUser', wpUser);
+        fd.append('wpPassword', wpPassword);
+      }
+
       const res = await fetch('/api/upload', {
         method: 'POST',
-        body: formData,
+        body: fd,
       });
-      const data = await res.json();
-      if (data.success && data.files) {
-        setUploadedImages(prev => [...prev, ...data.files]);
-      } else {
-        alert(data.error || 'Failed to upload images');
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP error ${res.status} during upload of ${file.name}`);
       }
-    } catch (e) {
+
+      const data = await res.json();
+      if (data.success && data.files && data.files.length > 0) {
+        return data.files[0];
+      } else {
+        throw new Error(`Upload response did not return file details for ${file.name}`);
+      }
+    };
+
+    try {
+      const uploadPromises = Array.from(files).map((file) => uploadFile(file));
+      const uploadedFiles = await Promise.all(uploadPromises);
+      
+      setUploadedImages(prev => [...prev, ...uploadedFiles]);
+    } catch (e: any) {
       console.error(e);
-      alert('Error uploading images');
+      alert(`Error uploading images: ${e.message || e}`);
     } finally {
       setIsUploadingImages(false);
     }
   };
+
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();

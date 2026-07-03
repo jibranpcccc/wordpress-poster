@@ -729,10 +729,22 @@ export async function POST(request: Request) {
   const customStream = new ReadableStream({
     async start(controller) {
       const sendProgress = (progress: number, message: string) => {
-        controller.enqueue(encoder.encode(JSON.stringify({ type: 'progress', progress, message }) + '\n'));
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify({ type: 'progress', progress, message }) + '\n'));
+        } catch (e) {}
       };
 
+      // Heartbeat to prevent Netlify CDN/gateway idle timeout (10s limit)
+      const heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(' \n'));
+        } catch (e) {
+          clearInterval(heartbeat);
+        }
+      }, 1500);
+
       try {
+
         const {
           projectId,
           articleContent,
@@ -1551,8 +1563,10 @@ ${preAnalyzedImagesText}`;
           error: e.message || 'Failed to analyze post'
         }) + '\n'));
       } finally {
+        clearInterval(heartbeat);
         controller.close();
       }
+
     }
   });
 
