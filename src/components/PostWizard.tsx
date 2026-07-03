@@ -133,12 +133,17 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
       let visionResults: any[] = [];
 
       if (totalImages > 0) {
-        setAnalysisStatus(`Analyzing ${totalImages} image(s) in parallel...`);
-        addLog(`VISION: Queueing parallel analysis for ${totalImages} image(s) using provider: "${data.visionProvider || 'cloudflare'}"...`);
+        setAnalysisStatus(`Analyzing ${totalImages} image(s)...`);
+        addLog(`VISION: Processing ${totalImages} image(s) in chunks of 2 using provider: "${data.visionProvider || 'cloudflare'}"...`);
         let completed = 0;
-        
-        visionResults = await Promise.all(
-          draftProject.images.map(async (img) => {
+        const images = draftProject.images;
+        const chunkSize = 2;
+        visionResults = new Array(totalImages);
+
+        for (let i = 0; i < images.length; i += chunkSize) {
+          const chunk = images.slice(i, i + chunkSize);
+          const chunkPromises = chunk.map(async (img, chunkIdx) => {
+            const index = i + chunkIdx;
             try {
               const res = await fetch('/api/analyze/vision', {
                 method: 'POST',
@@ -162,23 +167,27 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
               setAnalysisProgress(percent);
               setAnalysisStatus(`Analyzed ${completed} of ${totalImages} image(s)...`);
               addLog(`VISION: Image "${img.originalName}" analyzed successfully.`);
-              return parsed;
+              visionResults[index] = parsed;
             } catch (err: any) {
               console.warn(`Vision analysis failed for image ${img.originalName}, using fallback:`, err);
               completed++;
               addLog(`WARNING: Vision analysis failed for "${img.originalName}". Applied keyword-based fallback.`);
-              // Fallback descriptor matching route schema
+              // Generate unique fallback based on original filename to prevent duplicate SEO fields
+              const stem = img.originalName.replace(/\.[^/.]+$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
               const kwSlug = (data.mainKeyword || 'hair-style').toLowerCase().replace(/[^a-z0-9]+/g, '-');
-              return {
+              const finalFn = stem.length >= 3 ? `${stem}.jpg` : `${kwSlug}-image-${index}.jpg`;
+              const cleanStem = img.originalName.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+              visionResults[index] = {
                 id: img.id,
                 originalName: img.originalName,
-                seoFilename: `${kwSlug}-image.jpg`,
-                altText: `${data.mainKeyword || 'Hair style'} hair view.`,
+                seoFilename: finalFn,
+                altText: `${data.mainKeyword || 'Hair style'} hair view showing ${cleanStem}.`,
                 caption: ''
               };
             }
-          })
-        );
+          });
+          await Promise.all(chunkPromises);
+        }
       } else {
         setAnalysisProgress(50);
         addLog("INFO: No images uploaded. Skipping visual analysis phase.");

@@ -367,8 +367,8 @@ async function analyzeImageWithCloudflare(
   const startIdx = Math.floor(Math.random() * creds.length);
   const ordered = [...creds.slice(startIdx), ...creds.slice(0, startIdx)];
 
-  const buffer = Buffer.from(base64Data, 'base64');
-  const imageArray = Array.from(buffer);
+  const mimeType = img.ext === 'png' ? 'image/png' : img.ext === 'webp' ? 'image/webp' : 'image/jpeg';
+  const dataUrl = `data:${mimeType};base64,${base64Data}`;
 
   const kw = mainKeyword || "Hair Style";
   const prompt = `Analyze this hairstyle image for image SEO. Focus on hair texture, color placement, highlights, lowlights, cut, or style.
@@ -438,17 +438,25 @@ Alt Text: [SEO alt text]`;
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          image: imageArray,
-          prompt: prompt,
-          max_tokens: 256
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: prompt },
+                { type: "image_url", image_url: { url: dataUrl } }
+              ]
+            }
+          ],
+          max_tokens: 1024
         }),
-        signal: AbortSignal.timeout(18000)
+        signal: AbortSignal.timeout(90000)
       });
 
       if (res.status === 200) {
         const data = await res.json();
-        if (data.success && data.result && data.result.description) {
-          const desc = data.result.description.trim();
+        const choices = data.result?.choices || data.choices;
+        const desc = (choices?.[0]?.message?.content || choices?.[0]?.message?.reasoning || choices?.[0]?.text || '').trim();
+        if (desc) {
           
           // Parse "Filename: ..." and "Alt Text: ..."
           const filenameMatch = desc.match(/Filename:\s*([^\r\n]+)/i);
