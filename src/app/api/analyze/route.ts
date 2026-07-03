@@ -1192,6 +1192,29 @@ ${preAnalyzedImagesText}`;
           const finalImageMatches: any[] = [];
           const occupiedIndices = new Set<number>();
 
+          // Sanitize AI-generated image SEO fields
+          const BANNED_FILENAME_RE = /^(hair-style|long-hair-style|short-hair-style|hairstyle-woman|hairstyle-photo|woman-hairstyle|hair-style-woman|medium-hair-style|hairstyle-analysis)/i;
+          const BANNED_FN_WORDS = ['woman', 'photo', 'image', 'picture', 'girl', 'model'];
+          const BANNED_ALT_RE = /\b(woman|girl|man|person|model|client|shirt|sweater|blouse|dress|earrings|necklace|hair tie|sitting|standing|selfie|posing|wearing|room|bed|bedroom|chair|mirror|wall|background|sofa|window|photo|image|picture|face|smile|eyes)\b/gi;
+
+          function sanitizeImageSEO(seoFilename: string, altText: string, fallbackKw: string): { seoFilename: string; altText: string } {
+            const fnBase = seoFilename.replace(/\.[^/.]+$/, '').toLowerCase();
+            const fnIsGeneric = BANNED_FILENAME_RE.test(fnBase) || BANNED_FN_WORDS.some(w => fnBase.includes(w));
+            if (fnIsGeneric) {
+              const cleanWords = altText.toLowerCase()
+                .replace(/[^a-z0-9\s-]/g, '')
+                .split(/\s+/)
+                .filter(w => w.length > 2 && !['the', 'and', 'for', 'with', 'has', 'her', 'his', 'woman', 'girl', 'photo', 'image'].includes(w))
+                .slice(0, 5);
+              seoFilename = cleanWords.length >= 3 ? cleanWords.join('-') + '.jpg' : `${fallbackKw.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-color-technique.jpg`;
+            }
+            let clean = altText.replace(BANNED_ALT_RE, '').replace(/\s{2,}/g, ' ').replace(/^[,.\s]+|[,.\s]+$/g, '').replace(/\s*,\s*,/g, ',').trim();
+            if (clean.length < 30) {
+              clean = `${seoFilename.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ')} — ${fallbackKw} inspiration`;
+            }
+            return { seoFilename, altText: clean };
+          }
+
           // First pass: Add all valid AI-recommended placements
           if (parsedData.imageMatches && Array.isArray(parsedData.imageMatches)) {
             parsedData.imageMatches.forEach((match: any) => {
@@ -1202,11 +1225,14 @@ ${preAnalyzedImagesText}`;
                   : null;
                 
                 if (match.useImage !== false && placementIndex !== null) {
+                  const rawFn = match.seoFilename || vr.seoFilename;
+                  const rawAlt = match.altText || vr.altText;
+                  const sanitized = sanitizeImageSEO(rawFn, rawAlt, mainKeyword || 'hair style');
                   finalImageMatches.push({
                     id: vr.id,
                     originalName: vr.originalName,
-                    seoFilename: match.seoFilename || vr.seoFilename,
-                    altText: match.altText || vr.altText,
+                    seoFilename: sanitized.seoFilename,
+                    altText: sanitized.altText,
                     caption: match.caption || vr.caption,
                     placementParagraphIndex: placementIndex,
                     useImage: true,
@@ -1253,11 +1279,15 @@ ${preAnalyzedImagesText}`;
               
               const match = parsedData.imageMatches?.find((m: any) => m.id === vr.id || m.originalName === vr.originalName);
 
+              const rawFn = match?.seoFilename || vr.seoFilename;
+              const rawAlt = match?.altText || vr.altText || `${mainKeyword || 'Hair style'} - image ${idx + 1}`;
+              const sanitized = sanitizeImageSEO(rawFn, rawAlt, mainKeyword || 'hair style');
+
               finalImageMatches.push({
                 id: vr.id,
                 originalName: vr.originalName,
-                seoFilename: match?.seoFilename || vr.seoFilename,
-                altText: match?.altText || vr.altText || `${mainKeyword || 'Hair style'} - image ${idx + 1}`,
+                seoFilename: sanitized.seoFilename,
+                altText: sanitized.altText,
                 caption: match?.caption || vr.caption || '',
                 placementParagraphIndex: placementIndex,
                 useImage: true,

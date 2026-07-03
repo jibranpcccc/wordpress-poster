@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Project, ImageDetail, SEOData } from '@/lib/db';
 import WordPressConnect from './WordPressConnect';
 import NewPostForm from './NewPostForm';
@@ -45,7 +45,21 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [analysisStatus, setAnalysisStatus] = useState('');
+  const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
+  const consoleEndRef = useRef<HTMLDivElement>(null);
   const [previewTab, setPreviewTab] = useState<'preview' | 'publish'>('preview');
+
+  // Auto scroll console to bottom
+  useEffect(() => {
+    if (consoleEndRef.current) {
+      consoleEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [consoleLogs]);
+
+  const addLog = (message: string) => {
+    const time = new Date().toLocaleTimeString();
+    setConsoleLogs(prev => [...prev, `[${time}] ${message}`]);
+  };
 
   const paragraphs = (project.formattedContent || project.articleContent)
     .split('\n')
@@ -79,6 +93,8 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
     setIsAnalyzing(true);
     setAnalysisProgress(0);
     setAnalysisStatus('Connecting to AI endpoint...');
+    setConsoleLogs([]);
+    addLog("INFO: Starting WordPress Smart Post Builder analysis flow...");
     
     // Save draft state first
     const draftProject: Project = {
@@ -109,35 +125,93 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
     onSaveProject(draftProject);
 
     try {
-      // Call Streaming API Endpoint
-      const res = await fetch('/api/analyze', {
+      setAnalysisProgress(5);
+      setAnalysisStatus("Initializing analysis flow...");
+      addLog("INFO: Saved project draft state to database.");
+
+      const totalImages = draftProject.images.length;
+      let visionResults: any[] = [];
+
+      if (totalImages > 0) {
+        setAnalysisStatus(`Analyzing ${totalImages} image(s) in parallel...`);
+        addLog(`VISION: Queueing parallel analysis for ${totalImages} image(s) using provider: "${data.visionProvider || 'cloudflare'}"...`);
+        let completed = 0;
+        
+        visionResults = await Promise.all(
+          draftProject.images.map(async (img) => {
+            try {
+              const res = await fetch('/api/analyze/vision', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  image: img,
+                  mainKeyword: data.mainKeyword,
+                  customGeminiKey: data.customGeminiKey,
+                  customApiKey: data.customApiKey,
+                  visionProvider: data.visionProvider
+                })
+              });
+              
+              if (!res.ok) {
+                throw new Error(`Vision API error ${res.status}`);
+              }
+              
+              const parsed = await res.json();
+              completed++;
+              const percent = Math.round(5 + (completed / totalImages) * 45); // up to 50%
+              setAnalysisProgress(percent);
+              setAnalysisStatus(`Analyzed ${completed} of ${totalImages} image(s)...`);
+              addLog(`VISION: Image "${img.originalName}" analyzed successfully.`);
+              return parsed;
+            } catch (err: any) {
+              console.warn(`Vision analysis failed for image ${img.originalName}, using fallback:`, err);
+              completed++;
+              addLog(`WARNING: Vision analysis failed for "${img.originalName}". Applied keyword-based fallback.`);
+              // Fallback descriptor matching route schema
+              const kwSlug = (data.mainKeyword || 'hair-style').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+              return {
+                id: img.id,
+                originalName: img.originalName,
+                seoFilename: `${kwSlug}-image.jpg`,
+                altText: `${data.mainKeyword || 'Hair style'} hair view.`,
+                caption: ''
+              };
+            }
+          })
+        );
+      } else {
+        setAnalysisProgress(50);
+        addLog("INFO: No images uploaded. Skipping visual analysis phase.");
+      }
+
+      // Phase 2: Copywriting
+      setAnalysisProgress(60);
+      setAnalysisStatus("Generating post copy, layout & formatting...");
+      addLog(`COPYWRITING: Starting copywriting and formatting phase using model: "${data.model}"...`);
+
+      const copywriterRes = await fetch('/api/analyze/copywriter', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          projectId: draftProject.id,
           articleContent: data.articleContent,
           mainKeyword: data.mainKeyword,
           relatedKeywords: data.relatedKeywords,
-          images: draftProject.images,
+          visionResults: visionResults,
           customApiKey: data.customApiKey,
           customGeminiKey: data.customGeminiKey,
-          model: data.model,
-          wpUrl: localStorage.getItem('wp_active_site_url') || localStorage.getItem('wp_site_url') || '',
-          customSeoTitle: data.customSeoTitle,
-          customMetaDescription: data.customMetaDescription,
-          customSlug: data.customSlug,
-          visionProvider: data.visionProvider
+          selectedModel: data.model,
+          wpUrl: localStorage.getItem('wp_active_site_url') || localStorage.getItem('wp_site_url') || ''
         })
       });
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `HTTP error ${res.status}`);
+      if (!copywriterRes.ok) {
+        const errData = await copywriterRes.json().catch(() => ({}));
+        throw new Error(errData.error || `Copywriter API error ${copywriterRes.status}`);
       }
 
-      const reader = res.body?.getReader();
+      const reader = copywriterRes.body?.getReader();
       if (!reader) {
-        throw new Error("Could not initialize chunk reader.");
+        throw new Error("Could not initialize copywriter chunk reader.");
       }
 
       const decoder = new TextDecoder();
@@ -153,24 +227,35 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
         buffer = lines.pop() || ''; // retain the last partial line
 
         for (const line of lines) {
-          if (!line.trim()) continue;
+          if (!line.trim()) {
+            if (line === ' ') {
+              addLog("HEARTBEAT: Connection kept alive by server.");
+            }
+            continue;
+          }
           
           try {
             const parsed = JSON.parse(line.trim());
             if (parsed.type === 'progress') {
               setAnalysisProgress(parsed.progress);
               setAnalysisStatus(parsed.message);
+              addLog(`PROGRESS: ${parsed.message} (${parsed.progress}%)`);
             } else if (parsed.type === 'success') {
               ai = parsed.data;
+              addLog("SUCCESS: Copywriter model returned structured post JSON.");
             } else if (parsed.type === 'error') {
+              addLog(`ERROR: Copywriter endpoint error: ${parsed.error}`);
               throw new Error(parsed.error);
             }
           } catch (jsonErr: any) {
-            // Ignore parse errors on incomplete chunks
-            console.warn("Stream JSON parse warning:", jsonErr);
+            // Ignore parse warnings on heartbeats
           }
         }
       }
+
+      setAnalysisProgress(95);
+      setAnalysisStatus("Wrapping up SEO mapping...");
+      addLog("INFO: Distributing images and merging AI metadata...");
 
       if (ai) {
         // Merge AI analysis results back into images
@@ -217,14 +302,17 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
           }
         };
 
+        setAnalysisProgress(100);
         setProject(completedProject);
         onSaveProject(completedProject);
+        addLog("SUCCESS: SEO structure and formatted paragraphs updated successfully!");
         setStep(3); // Advance to matching
       } else {
         throw new Error('AI returned an empty response during analysis.');
       }
     } catch (e: any) {
       console.error(e);
+      addLog(`ERROR: Analysis failed: ${e.message}`);
       const errorProject: Project = {
         ...draftProject,
         status: 'error',
@@ -268,35 +356,76 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
   return (
     <div className="space-y-6">
       {isAnalyzing && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-slate-100 transform transition-all animate-fade-in">
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-slate-900 text-white rounded-3xl p-8 max-w-lg w-full shadow-2xl border border-slate-800/80 transform transition-all">
             <div className="text-center mb-6">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-50 text-emerald-600 mb-4 animate-bounce">
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-500/10 text-emerald-400 mb-4 animate-pulse">
+                <svg className="w-8 h-8 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
               </div>
-              <h3 className="text-xl font-bold text-slate-800">WordPress Smart Post Builder</h3>
-              <p className="text-sm text-slate-500 mt-1">Generating your SEO optimized post</p>
+              <h3 className="text-xl font-bold text-slate-100">WordPress Smart Post Builder</h3>
+              <p className="text-sm text-slate-400 mt-1">Generating your SEO optimized post</p>
             </div>
 
             {/* Progress Bar Container */}
-            <div className="w-full bg-slate-100 rounded-full h-3 mb-4 overflow-hidden relative">
+            <div className="w-full bg-slate-800 rounded-full h-3 mb-4 overflow-hidden relative border border-slate-700/50">
               <div 
-                className="bg-emerald-600 h-full rounded-full transition-all duration-500 ease-out shadow-[0_0_8px_rgba(16,185,129,0.5)]"
+                className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-all duration-500 ease-out shadow-[0_0_12px_rgba(16,185,129,0.6)]"
                 style={{ width: `${analysisProgress}%` }}
               />
             </div>
 
-            <div className="flex justify-between items-center mb-6">
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Current Stage</span>
-              <span className="text-sm font-bold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full">{analysisProgress}%</span>
+            <div className="flex justify-between items-center mb-4">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Current Stage</span>
+              <span className="text-sm font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">{analysisProgress}%</span>
             </div>
 
-            <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 min-h-[70px] flex items-center justify-center text-center">
-              <p className="text-sm font-medium text-slate-600 leading-relaxed animate-pulse">
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4 min-h-[70px] flex items-center justify-center text-center mb-4 backdrop-blur-sm">
+              <p className="text-sm font-medium text-slate-300 leading-relaxed">
                 {analysisStatus || "Initializing post analysis..."}
               </p>
+            </div>
+
+            {/* Live Console Container */}
+            <div className="space-y-2 text-left">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Live System Console</span>
+              <div className="bg-slate-950 rounded-2xl p-4 font-mono text-[11px] text-slate-300 border border-slate-800/80 h-44 overflow-y-auto space-y-1.5 shadow-inner scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
+                {consoleLogs.length === 0 ? (
+                  <div className="text-slate-500 italic">[Waiting for log output...]</div>
+                ) : (
+                  consoleLogs.map((log, idx) => {
+                    let logClass = 'text-slate-400';
+                    if (log.includes('ERROR:')) logClass = 'text-rose-400 font-bold';
+                    else if (log.includes('SUCCESS:')) logClass = 'text-emerald-400 font-bold';
+                    else if (log.includes('HEARTBEAT:')) logClass = 'text-cyan-400/85';
+                    else if (log.includes('VISION:')) logClass = 'text-indigo-400';
+                    else if (log.includes('PROGRESS:')) logClass = 'text-amber-400/90';
+
+                    return (
+                      <div key={idx} className={`${logClass} break-all leading-normal`}>
+                        {log}
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={consoleEndRef} />
+              </div>
+            </div>
+            
+            <div className="mt-4 pt-4 border-t border-slate-800/80 flex justify-center">
+              <a 
+                href="/api/debug-log" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition font-medium"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                View full server debug log
+              </a>
             </div>
           </div>
         </div>
