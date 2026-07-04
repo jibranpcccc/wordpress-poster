@@ -321,7 +321,7 @@ export async function POST(request: Request) {
           try {
             const cleanWpUrl = wpUrl.replace(/\/$/, "");
             sendProgress(62, `Fetching existing WordPress posts from ${cleanWpUrl}...`);
-            const wpRes = await fetch(`${cleanWpUrl}/wp-json/wp/v2/posts?per_page=50&_fields=title,link`, {
+            const wpRes = await fetch(`${cleanWpUrl}/wp-json/wp/v2/posts?per_page=15&_fields=title,link`, {
               signal: AbortSignal.timeout(4000)
             });
             if (wpRes.ok) {
@@ -566,7 +566,7 @@ ${preAnalyzedImagesText}`;
             logDebug(`Request aborted by client. Skipping Gemini model ${geminiModel}.`);
             return;
           }
-          const combined = makeCombinedSignal(request.signal, 90000);
+          const combined = makeCombinedSignal(request.signal, 180000);
           try {
             sendProgress(70, `Submitting request to Gemini model: ${geminiModel}...`);
             const geminiRes = await fetch(
@@ -616,7 +616,7 @@ ${preAnalyzedImagesText}`;
             logDebug(`Request aborted by client. Skipping OpenCode model ${modelName}.`);
             return;
           }
-          const combined = makeCombinedSignal(request.signal, 90000);
+          const combined = makeCombinedSignal(request.signal, 180000);
           try {
             sendProgress(75, `Submitting request to OpenCode model: ${modelName}...`);
             const client = getOpenCodeClient(customApiKey);
@@ -629,7 +629,7 @@ ${preAnalyzedImagesText}`;
                 ],
                 response_format: { type: "json_object" },
                 temperature: 0.2,
-                max_tokens: 4096
+                max_tokens: 16384
               },
               { signal: combined.signal }
             );
@@ -668,6 +668,7 @@ ${preAnalyzedImagesText}`;
           logDebug("Primary model failed, starting OpenCode fallbacks...");
           const fallbackModels = [
             'big-pickle',
+            'minimax-m3',
             'deepseek-v4-flash-free',
             'nemotron-3-ultra-free',
             'north-mini-code-free'

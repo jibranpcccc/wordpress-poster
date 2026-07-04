@@ -907,7 +907,7 @@ export async function POST(request: Request) {
           try {
             const cleanWpUrl = wpUrl.replace(/\/$/, "");
             console.log(`[Interlink] Fetching latest posts from ${cleanWpUrl} for interlinking...`);
-            const wpRes = await fetch(`${cleanWpUrl}/wp-json/wp/v2/posts?per_page=50&_fields=title,link`, {
+            const wpRes = await fetch(`${cleanWpUrl}/wp-json/wp/v2/posts?per_page=15&_fields=title,link`, {
               signal: AbortSignal.timeout(4000)
             });
             if (wpRes.ok) {
@@ -1409,7 +1409,7 @@ ${preAnalyzedImagesText}`;
                 ],
                 response_format: { type: "json_object" },
                 temperature: 0.2,
-                max_tokens: 4096
+                max_tokens: 16384
               },
               { signal: abortCtrl.signal }
             );
@@ -1432,13 +1432,14 @@ ${preAnalyzedImagesText}`;
 
         // 1. First try the selected OpenCode model (e.g., deepseek-v4-flash-free)
         if (selectedModel && !selectedModel.startsWith('gemini-') && selectedModel !== 'cloudflare-glm') {
-          await tryOpenCodeModel(selectedModel, 45000);
+          await tryOpenCodeModel(selectedModel, 180000);
         }
 
         // 2. If it failed or wasn't run, fall back to other OpenCode models
         if (!responseData) {
           const fallbackModels = [
             'big-pickle',
+            'minimax-m3',
             'deepseek-v4-flash-free',
             'nemotron-3-ultra-free',
             'north-mini-code-free'
@@ -1446,7 +1447,7 @@ ${preAnalyzedImagesText}`;
           for (const model of fallbackModels) {
             if (responseData) break;
             if (model !== selectedModel) {
-              await tryOpenCodeModel(model, 45000);
+              await tryOpenCodeModel(model, 180000);
             }
           }
         }

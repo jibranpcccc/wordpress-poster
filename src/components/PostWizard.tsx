@@ -48,6 +48,23 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const [previewTab, setPreviewTab] = useState<'preview' | 'publish'>('preview');
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  // Timer to count elapsed seconds during AI Analysis
+  useEffect(() => {
+    let intervalId: any = null;
+    if (isAnalyzing) {
+      setElapsedSeconds(0);
+      intervalId = setInterval(() => {
+        setElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+    } else {
+      if (intervalId) clearInterval(intervalId);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isAnalyzing]);
 
   // Auto scroll console to bottom
   useEffect(() => {
@@ -388,10 +405,15 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
               <span className="text-sm font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">{analysisProgress}%</span>
             </div>
 
-            <div className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4 min-h-[70px] flex items-center justify-center text-center mb-4 backdrop-blur-sm">
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4 min-h-[70px] flex flex-col items-center justify-center text-center mb-4 backdrop-blur-sm">
               <p className="text-sm font-medium text-slate-300 leading-relaxed">
                 {analysisStatus || "Initializing post analysis..."}
               </p>
+              {isAnalyzing && (
+                <p className="text-xs text-amber-400 font-mono mt-2 animate-pulse">
+                  Elapsed Time: {elapsedSeconds}s {elapsedSeconds > 25 ? '— OpenCode reasoning models can take up to 2 minutes' : ''}
+                </p>
+              )}
             </div>
 
             {/* Live Console Container */}
