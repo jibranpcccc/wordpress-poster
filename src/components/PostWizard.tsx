@@ -240,6 +240,7 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
       const decoder = new TextDecoder();
       let buffer = '';
       let ai = null;
+      let serverError: string | null = null;
 
       while (true) {
         const { value, done } = await reader.read();
@@ -267,13 +268,17 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
               ai = parsed.data;
               addLog("SUCCESS: Copywriter model returned structured post JSON.");
             } else if (parsed.type === 'error') {
+              serverError = parsed.error;
               addLog(`ERROR: Copywriter endpoint error: ${parsed.error}`);
-              throw new Error(parsed.error);
             }
           } catch (jsonErr: any) {
             // Ignore parse warnings on heartbeats
           }
         }
+      }
+
+      if (serverError) {
+        throw new Error(serverError);
       }
 
       setAnalysisProgress(95);

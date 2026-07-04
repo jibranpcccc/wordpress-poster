@@ -44,17 +44,20 @@ if %errorlevel% neq 0 (
 
 :: 2. Check and install dependencies
 if not exist node_modules (
-    echo [INFO] First time run: Installing dependencies and clearing build cache...
+    echo [INFO] First time run: Installing dependencies...
     echo This may take a minute. Please wait...
-    if exist .next (
-        rd /s /q .next >nul 2>&1
-    )
     call npm install
     if %errorlevel% neq 0 (
         echo [ERROR] Dependency installation failed!
         pause
         goto menu
     )
+)
+
+:: Clear stale .next cache folder to force re-compilation of updated API routes
+if exist .next (
+    echo [INFO] Clearing stale build cache...
+    rd /s /q .next >nul 2>&1
 )
 
 :: 3. Clean up port 3001 first

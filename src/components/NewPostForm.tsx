@@ -506,6 +506,7 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
               onChange={(e) => setModel(e.target.value)}
               className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-slate-50/30 font-medium text-slate-800"
             >
+              <option value="minimax-m3">⚡ Minimax M3 (OpenCode - Ultra Fast & 100% Stable)</option>
               <option value="big-pickle">🥒 Big Pickle (OpenCode - Best for SEO & Highly Intelligent)</option>
               <option value="deepseek-v4-flash-free">🌟 DeepSeek V4 Flash (OpenCode - Free & Smart)</option>
               <option value="nemotron-3-ultra-free">🚀 Nemotron 3 Ultra (OpenCode - Free)</option>

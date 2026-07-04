@@ -616,7 +616,8 @@ ${preAnalyzedImagesText}`;
             logDebug(`Request aborted by client. Skipping OpenCode model ${modelName}.`);
             return;
           }
-          const combined = makeCombinedSignal(request.signal, 180000);
+           const timeoutMs = modelName === 'big-pickle' ? 45000 : 180000;
+          const combined = makeCombinedSignal(request.signal, timeoutMs);
           try {
             sendProgress(75, `Submitting request to OpenCode model: ${modelName}...`);
             const client = getOpenCodeClient(customApiKey);
@@ -667,8 +668,8 @@ ${preAnalyzedImagesText}`;
         if (!responseData) {
           logDebug("Primary model failed, starting OpenCode fallbacks...");
           const fallbackModels = [
-            'big-pickle',
             'minimax-m3',
+            'big-pickle',
             'deepseek-v4-flash-free',
             'nemotron-3-ultra-free',
             'north-mini-code-free'
