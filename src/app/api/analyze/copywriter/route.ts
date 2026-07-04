@@ -1,20 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getOpenCodeClient } from '@/lib/opencode-client';
-import fs from 'fs';
-import path from 'path';
 
+export const runtime = 'edge';
 export const maxDuration = 60; // Set to 60s max, kept alive by streaming heartbeat
 export const dynamic = 'force-dynamic';
 
 function logDebug(message: string) {
-  try {
-    const logPath = path.join(process.cwd(), 'public', 'api-debug.log');
-    const timestamp = new Date().toISOString();
-    fs.appendFileSync(logPath, `[${timestamp}] ${message}\n`);
-    console.log(`[Debug Log] ${message}`);
-  } catch (err) {
-    console.error('Failed to write debug log:', err);
-  }
+  console.log(`[Debug Log] ${message}`);
 }
 
 function getGeminiKeys(): string[] {
