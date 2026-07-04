@@ -969,6 +969,11 @@ ${preAnalyzedImagesText}`;
   });
 
   return new Response(customStream, {
-    headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no'
+    }
   });
 }

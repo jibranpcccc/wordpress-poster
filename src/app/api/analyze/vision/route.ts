@@ -193,7 +193,7 @@ export async function POST(request: Request) {
       }
     }
 
-    if (!base64Data) {
+    if (!base64Data && image.localPath) {
       const fullPath = path.join(uploadDir, image.localPath.replace(/^\//, ''));
       if (fs.existsSync(fullPath)) {
         const fileBuffer = fs.readFileSync(fullPath);
