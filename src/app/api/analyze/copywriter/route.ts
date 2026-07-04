@@ -526,7 +526,8 @@ Output Schema:
           .map((p: string, idx: number) => `[Paragraph ${idx}]: ${p}`)
           .join('\n\n');
 
-        const preAnalyzedImagesText = visionResults
+        const preAnalyzedImagesText = (visionResults || [])
+          .filter(Boolean)
           .map((vr: any) => `Image ID: ${vr.id}\nOriginal Name: ${vr.originalName}\nHair Description: ${vr.visualDescription || vr.altText || 'Hair style image — no visual description available'}`)
           .join('\n\n');
 
@@ -804,7 +805,7 @@ ${preAnalyzedImagesText}`;
         // Pass 1: Keep AI placed images
         if (parsedData.imageMatches && Array.isArray(parsedData.imageMatches)) {
           parsedData.imageMatches.forEach((match: any) => {
-            const vr = visionResults.find((v: any) => v.id === match.id || v.originalName === match.originalName);
+            const vr = (visionResults || []).filter(Boolean).find((v: any) => v && (v.id === match.id || v.originalName === match.originalName));
             if (vr) {
               const placementIndex = typeof match.placementParagraphIndex === 'number' && match.placementParagraphIndex >= 0
                 ? Math.min(match.placementParagraphIndex, cleanParagraphs.length - 1)
@@ -832,7 +833,7 @@ ${preAnalyzedImagesText}`;
 
         // Pass 2: Ensure all images are placed somewhere
         const pendingImages: any[] = [];
-        visionResults.forEach((vr: any) => {
+        (visionResults || []).filter(Boolean).forEach((vr: any) => {
           const alreadyPlaced = finalImageMatches.some(m => m.id === vr.id);
           if (!alreadyPlaced) {
             pendingImages.push(vr);
