@@ -28,7 +28,7 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
   const [category, setCategory] = useState('');
   const [tags, setTags] = useState('');
   const [articleContent, setArticleContent] = useState('');
-  const [model, setModel] = useState('big-pickle');
+  const [model, setModel] = useState('deepseek-v4-flash-free');
   const [visionProvider, setVisionProvider] = useState('cloudflare');
   
   // Custom SEO states
@@ -506,14 +506,12 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
               onChange={(e) => setModel(e.target.value)}
               className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-slate-50/30 font-medium text-slate-800"
             >
+              <option value="deepseek-v4-flash-free">🌟 DeepSeek V4 Flash (OpenCode - Recommended, Ultra Fast & Stable)</option>
               <option value="minimax-m3">⚡ Minimax M3 (OpenCode - Ultra Fast & 100% Stable)</option>
-              <option value="big-pickle">🥒 Big Pickle (OpenCode - Best for SEO & Highly Intelligent)</option>
-              <option value="deepseek-v4-flash-free">🌟 DeepSeek V4 Flash (OpenCode - Free & Smart)</option>
+              <option value="big-pickle">🥒 Big Pickle (OpenCode - SEO Reasoning, Very Slow - Requires 2 min)</option>
               <option value="nemotron-3-ultra-free">🚀 Nemotron 3 Ultra (OpenCode - Free)</option>
               <option value="north-mini-code-free">🧭 North Mini Code (OpenCode - Free)</option>
             </select>
-
-
           </div>
 
           <div>

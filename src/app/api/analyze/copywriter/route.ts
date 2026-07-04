@@ -559,7 +559,7 @@ ${preAnalyzedImagesText}`;
             logDebug(`Request aborted by client. Skipping Gemini model ${geminiModel}.`);
             return;
           }
-          const combined = makeCombinedSignal(request.signal, 180000);
+          const combined = makeCombinedSignal(request.signal, 15000);
           try {
             sendProgress(70, `Submitting request to Gemini model: ${geminiModel}...`);
             const geminiRes = await fetch(
@@ -609,7 +609,7 @@ ${preAnalyzedImagesText}`;
             logDebug(`Request aborted by client. Skipping OpenCode model ${modelName}.`);
             return;
           }
-          const timeoutMs = 180000; // Allow up to 3 minutes for all models
+          const timeoutMs = 15000; // Fast 15s timeout per model to allow quick fallbacks
           const combined = makeCombinedSignal(request.signal, timeoutMs);
           try {
             sendProgress(75, `Submitting request to OpenCode model: ${modelName}...`);
