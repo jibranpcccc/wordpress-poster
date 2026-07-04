@@ -609,12 +609,12 @@ ${preAnalyzedImagesText}`;
             logDebug(`Request aborted by client. Skipping OpenCode model ${modelName}.`);
             return;
           }
-           const timeoutMs = modelName === 'big-pickle' ? 45000 : 180000;
+          const timeoutMs = 180000; // Allow up to 3 minutes for all models
           const combined = makeCombinedSignal(request.signal, timeoutMs);
           try {
             sendProgress(75, `Submitting request to OpenCode model: ${modelName}...`);
             const client = getOpenCodeClient(customApiKey);
-            const response = await client.chat.completions.create(
+            const responseStream = await client.chat.completions.create(
               {
                 model: modelName,
                 messages: [
@@ -623,12 +623,30 @@ ${preAnalyzedImagesText}`;
                 ],
                 response_format: { type: "json_object" },
                 temperature: 0.2,
-                max_tokens: 16384
+                max_tokens: 16384,
+                stream: true
               },
               { signal: combined.signal }
             );
 
-            const rawText = response.choices?.[0]?.message?.content || '';
+            let rawText = '';
+            let chunkCount = 0;
+            for await (const chunk of responseStream) {
+              if (request.signal.aborted) {
+                logDebug(`Request aborted by client during stream. Ending stream.`);
+                break;
+              }
+              const content = chunk.choices?.[0]?.delta?.content || '';
+              rawText += content;
+              chunkCount++;
+              // Send heartbeat newline every 5 chunks to keep the socket active on Netlify
+              if (chunkCount % 5 === 0) {
+                try {
+                  controller.enqueue(encoder.encode(' \n'));
+                } catch (e) {}
+              }
+            }
+
             if (rawText) {
               logDebug(`OpenCode model ${modelName} returned content. Parsing...`);
               responseData = extractFlexibleJson(rawText);
