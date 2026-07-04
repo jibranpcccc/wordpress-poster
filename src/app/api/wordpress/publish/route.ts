@@ -130,9 +130,10 @@ export async function POST(request: Request) {
     const uploadDir = path.join(process.cwd(), 'public');
     const wpImageMap: { [localId: string]: { id: number; url: string } } = {};
 
-    // 3. Upload all active images to WP Media library in parallel
-    console.log(`[WP Media] Starting parallel upload of ${activeImages.length} images to WordPress...`);
-    const uploadPromises = activeImages.map(async (img) => {
+    // 3. Upload all active images to WP Media library in chunks of 4 to avoid overloading the WordPress server
+    console.log(`[WP Media] Starting chunked upload of ${activeImages.length} images to WordPress (concurrency: 4)...`);
+    
+    const uploadSingleImage = async (img: ImageDetail) => {
       try {
         if (img.wpMediaId) {
           console.log(`[WP Media] Image "${img.originalName}" is pre-uploaded (WP ID: ${img.wpMediaId}). Updating SEO metadata...`);
@@ -223,15 +224,24 @@ export async function POST(request: Request) {
         console.error(`Failed uploading image ${img.originalName} to WordPress:`, mediaErr);
         return null;
       }
-    });
+    };
 
-    const uploadResults = await Promise.all(uploadPromises);
+    const uploadResults: any[] = [];
+    const wpChunkSize = 4;
+    for (let i = 0; i < activeImages.length; i += wpChunkSize) {
+      const chunk = activeImages.slice(i, i + wpChunkSize);
+      console.log(`[WP Media] Uploading chunk ${Math.floor(i / wpChunkSize) + 1} of ${Math.ceil(activeImages.length / wpChunkSize)} (size: ${chunk.length})...`);
+      const chunkPromises = chunk.map(img => uploadSingleImage(img));
+      const chunkRes = await Promise.all(chunkPromises);
+      uploadResults.push(...chunkRes);
+    }
+    
     uploadResults.forEach(res => {
       if (res) {
         wpImageMap[res.localId] = res.wpMedia;
       }
     });
-    console.log(`[WP Media] Parallel image uploads completed.`);
+    console.log(`[WP Media] Chunked image uploads completed.`);
 
     // 4. Determine featured media ID
     let wpFeaturedMediaId = 0;

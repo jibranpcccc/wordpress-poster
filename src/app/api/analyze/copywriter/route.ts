@@ -301,7 +301,7 @@ export async function POST(request: Request) {
           visionResults = [],
           customApiKey = null,
           customGeminiKey = null,
-          selectedModel = 'deepseek-v4-flash-free',
+          selectedModel = 'big-pickle',
           wpUrl = ''
         } = body;
 
@@ -408,6 +408,7 @@ GLOBAL RULES:
 * Do not guess, force, or place irrelevant images.
 * If an image does not match any section, set "useImage": false.
 * The final filename and alt text must be optimized using both the image analysis and the matched article section.
+* CRITICAL: NEVER output generic option-lists (like 'highlights, lowlights, balayage, toner, or gloss' or 'layers, curls, or braids'). You must commit to EXACTLY ONE specific color, cut, or technique visible in the image, or do not mention it. Do not list possibilities with 'or'.
 * The copywriting model is the final authority for SEO filename, alt text, caption, and placement.
 
 EACH MATCHED IMAGE MUST INCLUDE:
@@ -666,6 +667,7 @@ ${preAnalyzedImagesText}`;
         if (!responseData) {
           logDebug("Primary model failed, starting OpenCode fallbacks...");
           const fallbackModels = [
+            'big-pickle',
             'deepseek-v4-flash-free',
             'nemotron-3-ultra-free',
             'north-mini-code-free'
@@ -727,7 +729,7 @@ ${preAnalyzedImagesText}`;
 
         // Strip template placeholders, backticks, character counts, and instruction text from AI output
         function cleanAIOutput(text: string): string {
-          return text
+          let cleaned = text
             .replace(/^[`*]+|[`*]+$/g, '')                          // leading/trailing backticks/asterisks
             .replace(/`/g, '')                                       // all backticks
             .replace(/\(\d{1,3}\s*characters?\)/gi, '')              // (95 characters)
@@ -746,6 +748,29 @@ ${preAnalyzedImagesText}`;
             .replace(/\s{2,}/g, ' ')                                 // multiple spaces
             .replace(/^[,.;:\s]+|[,.;:\s]+$/g, '')                   // leading/trailing punctuation
             .trim();
+
+          // Strip or-lists of generic techniques and replace them with natural terms
+          const patterns = [
+            { regex: /\b(visible\s+)?evidence\s+of\s+curls,\s*braids,\s*balayage,\s*toner,\s*gloss,\s*or\s*lowlights\b/gi, replace: "dimensional tones" },
+            { regex: /\b(visible\s+|apparent\s+)?highlights,\s*lowlights,\s*(or\s+)?balayage,\s*toner,\s*or\s*gloss\b/gi, replace: "dimensional color" },
+            { regex: /\b(visible\s+|apparent\s+)?highlights,\s*lowlights,\s*balayage,\s*toner,\s*or\s*gloss\b/gi, replace: "dimensional color" },
+            { regex: /\b(visible\s+|apparent\s+)?highlights,\s*lowlights,\s*balayage,\s*toner,\s*gloss,\s*curls,\s*braids,\s*or\s*gray\s*blending\b/gi, replace: "blended color" },
+            { regex: /\b(visible\s+|apparent\s+)?highlights,\s*lowlights,\s*or\s*balayage\b/gi, replace: "subtle highlights" },
+            { regex: /\btoned\/glossed\s+effects\b/gi, replace: "toner refresh" },
+            { regex: /\b(regrowth,\s*curls,\s*or\s*dimension|regrowth,\s*gray\s*blending,\s*balayage,\s*toner,\s*or\s*gloss)\b/gi, replace: "natural grow-out" },
+            { regex: /\b(layers,\s*curls,\s*or\s*braids|layers,\s*curls,\s*or\s*styling)\b/gi, replace: "layered styling" },
+            { regex: /\bcurls,\s*braids,\s*or\s*visible\s*gray\s*blending\b/gi, replace: "textured styling" },
+            { regex: /\bgray\s+blending\s+or\s+regrowth\s+visible\b/gi, replace: "soft regrowth blending" },
+            { regex: /\bgray\s+blending\s+or\s+regrowth\b/gi, replace: "soft regrowth blending" },
+            { regex: /\bcurls,\s*braids,\s*or\s*highlights,\s*lowlights,\s*balayage,\s*toner,\s*or\s*gloss\b/gi, replace: "dimensional highlights" }
+          ];
+
+          for (const p of patterns) {
+            cleaned = cleaned.replace(p.regex, p.replace);
+          }
+
+          cleaned = cleaned.replace(/\s*,\s*or\s+/gi, ' or ').trim();
+          return cleaned;
         }
 
         function sanitizeImageSEO(seoFilename: string, altText: string, fallbackKw: string, visualDesc?: string): { seoFilename: string; altText: string } {

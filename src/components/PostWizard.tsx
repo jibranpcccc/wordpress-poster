@@ -134,10 +134,10 @@ export default function PostWizard({ initialProject, onBackToDashboard, onSavePr
 
       if (totalImages > 0) {
         setAnalysisStatus(`Analyzing ${totalImages} image(s)...`);
-        addLog(`VISION: Describing hair in ${totalImages} image(s) in fast chunks of 5 using provider: "${data.visionProvider || 'cloudflare'}"...`);
+        addLog(`VISION: Describing hair in ${totalImages} image(s) in fast chunks of 10 using LLava vision...`);
         let completed = 0;
         const images = draftProject.images;
-        const chunkSize = 5;
+        const chunkSize = 10;
         visionResults = new Array(totalImages);
 
         for (let i = 0; i < images.length; i += chunkSize) {

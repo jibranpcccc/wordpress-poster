@@ -6,17 +6,7 @@ import { db } from '@/lib/db';
 export const maxDuration = 10;
 export const dynamic = 'force-dynamic';
 
-function getGeminiKeys(): string[] {
-  const keys: string[] = [];
-  for (let i = 1; i <= 50; i++) {
-    const k = process.env[`GEMINI_API_KEY_${i}`] || process.env[`GEMINI_API_KEY`];
-    if (k) keys.push(k.trim());
-  }
-  return keys;
-}
-
-const GEMINI_KEYS = getGeminiKeys();
-
+// Load Cloudflare credentials
 function getCloudflareCredentials() {
   const creds: { key: string; acc: string; index: number }[] = [];
   for (let i = 1; i <= 150; i++) {
@@ -32,17 +22,17 @@ function getCloudflareCredentials() {
 // Strip markdown artifacts from vision model output
 function cleanVisionText(text: string): string {
   return text
-    .replace(/^```[a-z]*\n?/gm, '')   // opening code fences
-    .replace(/\n?```$/gm, '')           // closing code fences
-    .replace(/^[`]+|[`]+$/g, '')        // leading/trailing backticks
-    .replace(/^\*+\s*/gm, '')           // bullet asterisks
-    .replace(/^#+\s*/gm, '')            // heading hashes
-    .replace(/\*\*/g, '')               // bold markers
-    .replace(/\n{3,}/g, '\n\n')         // excessive newlines
+    .replace(/^```[a-z]*\n?/gm, '')
+    .replace(/\n?```$/gm, '')
+    .replace(/^[`]+|[`]+$/g, '')
+    .replace(/^\*+\s*/gm, '')
+    .replace(/^#+\s*/gm, '')
+    .replace(/\*\*/g, '')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
-// Cloudflare Gemma-4 Vision — SIMPLE hair description only
+// Cascade Vision Runner: Llama 4 Scout -> Llama 3.2 Vision -> LLava 1.5
 async function describeHairWithCloudflare(
   img: { id: string; originalName: string; base64: string; ext: string },
   mainKeyword?: string
@@ -52,147 +42,113 @@ async function describeHairWithCloudflare(
     base64Data = base64Data.split(';base64,')[1];
   }
 
+  const mimeType = img.ext === 'png' ? 'image/png' : img.ext === 'webp' ? 'image/webp' : 'image/jpeg';
+  const dataUrl = `data:${mimeType};base64,${base64Data}`;
+  const buffer = Buffer.from(base64Data, 'base64');
+  const byteArray = Array.from(new Uint8Array(buffer));
+
   const creds = getCloudflareCredentials();
   if (creds.length === 0) {
     throw new Error("No Cloudflare credentials found");
   }
 
+  // Shuffle keys to distribute rate limits
   const startIdx = Math.floor(Math.random() * creds.length);
-  const ordered = [...creds.slice(startIdx), ...creds.slice(0, startIdx)];
+  const orderedCreds = [...creds.slice(startIdx), ...creds.slice(0, startIdx)];
 
-  const mimeType = img.ext === 'png' ? 'image/png' : img.ext === 'webp' ? 'image/webp' : 'image/jpeg';
-  const dataUrl = `data:${mimeType};base64,${base64Data}`;
+  const promptText = `Describe ONLY the hair visible in this image in 2-3 detailed sentences. Focus on: hair color, length, texture, highlights, lowlights, balayage, toner, gloss, cut style, layers, curls, braids, face-framing, dimension, gray blending, regrowth. Do NOT mention people, faces, clothing, accessories, background, room, or furniture.`;
 
-  // SIMPLE prompt — just describe what you see. No SEO, no formatting rules.
-  const prompt = `Describe ONLY the hair visible in this image in 2-3 short sentences.
+  // Define models in order of quality/efficiency preference
+  // 1. Llama 4 Scout (17B) - extremely fast, state-of-the-art vision
+  // 2. Llama 3.2 Vision (11B) - excellent quality, descriptive
+  // 3. LLava 1.5 (7B) - fast baseline fallback
+  const models = [
+    { name: 'llama-4-scout-17b', endpoint: '@cf/meta/llama-4-scout-17b-16e-instruct', type: 'chat' },
+    { name: 'llama-3.2-11b-vision', endpoint: '@cf/meta/llama-3.2-11b-vision-instruct', type: 'chat' },
+    { name: 'llava-1.5-7b', endpoint: '@cf/llava-hf/llava-1.5-7b-hf', type: 'legacy' }
+  ];
 
-Focus on: hair length, texture, color, highlights, lowlights, balayage, foils, toner, gloss, cut style, layers, curls, braids, regrowth, gray blending, color placement, face-framing, dimension.
+  // Attempt models sequentially, each using the key pool
+  for (const model of models) {
+    console.log(`[Vision] Trying model "${model.name}" for image "${img.originalName}"...`);
+    
+    for (const cred of orderedCreds) {
+      try {
+        const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/${model.endpoint}`;
+        let res;
 
-Do NOT mention: people, faces, expressions, clothing, accessories, background, room, furniture, camera, or poses. Only describe the hair itself.
-
-Example: "Shoulder-length wavy brunette hair with golden balayage highlights through mid-lengths and ends. Soft face-framing layers add dimension. Natural root shadow blends into warm caramel tones."`;
-
-  for (const cred of ordered) {
-    try {
-      console.log(`[Vision] Describing hair in "${img.originalName}" via Cloudflare Key #${cred.index}...`);
-      const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/@cf/google/gemma-4-26b-a4b-it`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${cred.key}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          messages: [
-            {
-              role: "user",
-              content: [
-                { type: "text", text: prompt },
-                { type: "image_url", image_url: { url: dataUrl } }
-              ]
-            }
-          ],
-          max_tokens: 512
-        }),
-        signal: AbortSignal.timeout(45000)
-      });
-
-      if (res.status === 200) {
-        const data = await res.json();
-        const choices = data.result?.choices || data.choices;
-        const desc = (choices?.[0]?.message?.content || choices?.[0]?.text || '').trim();
-        if (desc && desc.length > 10) {
-          const cleaned = cleanVisionText(desc);
-          console.log(`[Vision] Got description for "${img.originalName}": ${cleaned.substring(0, 80)}...`);
-          return {
-            id: img.id,
-            originalName: img.originalName,
-            visualDescription: cleaned,
-            seoFilename: '',
-            altText: '',
-            caption: ''
-          };
-        }
-      } else {
-        console.warn(`[Vision] Cloudflare Key #${cred.index} returned status ${res.status}`);
-      }
-    } catch (e: any) {
-      console.warn(`[Vision] Cloudflare Key #${cred.index} error: ${e.message}`);
-    }
-  }
-
-  throw new Error("All Cloudflare vision keys failed");
-}
-
-// Gemini Vision Fallback — same simple description prompt
-async function describeHairWithGemini(
-  img: { id: string; originalName: string; base64: string; ext: string },
-  customGeminiKey: string | null,
-  mainKeyword?: string
-) {
-  let base64Data = img.base64;
-  if (base64Data.includes(';base64,')) {
-    base64Data = base64Data.split(';base64,')[1];
-  }
-
-  const keys = customGeminiKey ? [customGeminiKey] : GEMINI_KEYS;
-  if (keys.length === 0) {
-    throw new Error("No Gemini keys found");
-  }
-
-  const start = Math.floor(Math.random() * keys.length);
-  const orderedKeys = [...keys.slice(start), ...keys.slice(0, start)];
-
-  const mimeType = img.ext === 'png' ? 'image/png' : img.ext === 'webp' ? 'image/webp' : 'image/jpeg';
-
-  const promptText = `Describe ONLY the hair visible in this image in 2-3 short sentences. Focus on hair length, texture, color, highlights, lowlights, balayage, foils, toner, gloss, cut style, layers, curls, braids, regrowth, gray blending, color placement, face-framing, dimension. Do NOT mention people, faces, clothing, accessories, background, room, or camera. Only describe the hair.`;
-
-  for (const apiKey of orderedKeys) {
-    try {
-      console.log(`[Vision] Describing hair in "${img.originalName}" via Gemini...`);
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: promptText },
+        if (model.type === 'chat') {
+          res = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${cred.key}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              messages: [
                 {
-                  inlineData: {
-                    mimeType: mimeType,
-                    data: base64Data
-                  }
+                  role: "user",
+                  content: [
+                    { type: "text", text: promptText },
+                    { type: "image_url", image_url: { url: dataUrl } }
+                  ]
                 }
-              ]
-            }
-          ]
-        }),
-        signal: AbortSignal.timeout(15000)
-      });
-
-      if (res.status === 200) {
-        const result = await res.json();
-        const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (text && text.trim().length > 10) {
-          const cleaned = cleanVisionText(text.trim());
-          return {
-            id: img.id,
-            originalName: img.originalName,
-            visualDescription: cleaned,
-            seoFilename: '',
-            altText: '',
-            caption: ''
-          };
+              ],
+              max_tokens: 256
+            }),
+            signal: AbortSignal.timeout(15000) // 15s timeout for fast failover
+          });
+        } else {
+          // Legacy LLava byte-array format
+          res = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${cred.key}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              image: byteArray,
+              prompt: promptText,
+              max_tokens: 256
+            }),
+            signal: AbortSignal.timeout(15000)
+          });
         }
+
+        if (res.status === 200) {
+          const data = await res.json();
+          let desc = '';
+          
+          if (model.type === 'chat') {
+            const choices = data.result?.choices || data.choices;
+            desc = (choices?.[0]?.message?.content || data.result?.response || '').trim();
+          } else {
+            desc = (data.result?.description || '').trim();
+          }
+
+          if (desc && desc.length > 10) {
+            const cleaned = cleanVisionText(desc);
+            console.log(`[Vision] SUCCESS using "${model.name}" (Key #${cred.index}): ${cleaned.substring(0, 85)}...`);
+            return {
+              id: img.id,
+              originalName: img.originalName,
+              visualDescription: cleaned,
+              seoFilename: '',
+              altText: '',
+              caption: ''
+            };
+          }
+        } else {
+          const errMsg = await res.text().catch(() => '');
+          console.warn(`[Vision] "${model.name}" (Key #${cred.index}) status ${res.status}: ${errMsg.substring(0, 100)}`);
+        }
+      } catch (err: any) {
+        console.warn(`[Vision] "${model.name}" (Key #${cred.index}) failed: ${err.message}`);
       }
-    } catch (e: any) {
-      console.warn(`[Vision] Gemini key error: ${e.message}`);
     }
   }
 
-  throw new Error("All Gemini keys failed");
+  throw new Error("All Cloudflare Worker AI models and keys in cascade failed");
 }
 
 export async function POST(request: Request) {
@@ -202,8 +158,6 @@ export async function POST(request: Request) {
     const body = await request.json();
     image = body.image;
     mainKeyword = body.mainKeyword || '';
-    const customGeminiKey = body.customGeminiKey;
-    const visionProvider = body.visionProvider || 'cloudflare';
 
     if (!image) {
       return NextResponse.json({ error: 'Image details are required' }, { status: 400 });
@@ -228,7 +182,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // 2. Load from local cache / filesystem uploads folder if not loaded
+    // 2. Load from local filesystem
     const uploadDir = path.join(process.cwd(), 'public');
     if (!base64Data) {
       const cachedPath = path.join(uploadDir, 'uploads', image.originalName);
@@ -259,23 +213,12 @@ export async function POST(request: Request) {
       ext
     };
 
-    // Run Cloudflare Gemma-4 vision or Gemini fallback
-    if (visionProvider === 'cloudflare') {
-      try {
-        const res = await describeHairWithCloudflare(imgObj, mainKeyword);
-        return NextResponse.json(res);
-      } catch (cfErr: any) {
-        console.warn(`[Vision] Cloudflare failed, falling back to Gemini: ${cfErr.message}`);
-      }
-    }
-
-    // Fallback to Gemini
-    const res = await describeHairWithGemini(imgObj, customGeminiKey, mainKeyword);
+    // Run cascade: Llama 4 -> Llama 3.2 -> LLava
+    const res = await describeHairWithCloudflare(imgObj, mainKeyword);
     return NextResponse.json(res);
 
   } catch (e: any) {
     console.error("[Vision Route Error]:", e);
-    // Return a descriptive fallback based on original filename
     const cleanStem = (image?.originalName || 'image').replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ').replace(/\d{10,}/g, '').trim();
     const fallback = {
       id: image?.id || 'img_err',
