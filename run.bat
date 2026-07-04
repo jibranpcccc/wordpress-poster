@@ -44,8 +44,11 @@ if %errorlevel% neq 0 (
 
 :: 2. Check and install dependencies
 if not exist node_modules (
-    echo [INFO] First time run: Installing dependencies...
+    echo [INFO] First time run: Installing dependencies and clearing build cache...
     echo This may take a minute. Please wait...
+    if exist .next (
+        rd /s /q .next >nul 2>&1
+    )
     call npm install
     if %errorlevel% neq 0 (
         echo [ERROR] Dependency installation failed!
@@ -129,6 +132,10 @@ echo [INFO] Deleting corrupted node_modules folder...
 echo This might take a minute. Please wait...
 if exist node_modules (
     rd /s /q node_modules >nul 2>&1
+)
+echo [INFO] Deleting stale .next cache folder...
+if exist .next (
+    rd /s /q .next >nul 2>&1
 )
 echo [INFO] Reinstalling dependencies cleanly...
 call npm install
