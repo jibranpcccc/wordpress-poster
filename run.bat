@@ -11,16 +11,18 @@ echo.
 echo   [1] Start Server (Port 3001) and Open Browser
 echo   [2] Stop Server (Kill Port 3001 ONLY)
 echo   [3] Restart Server
-echo   [4] Exit
+echo   [4] Clean Install Dependencies (Fixes "Unexpected token '<'" / crash errors)
+echo   [5] Exit
 echo.
 echo ============================================================
 echo.
-set /p choice="Enter your choice (1-4): "
+set /p choice="Enter your choice (1-5): "
 
 if "%choice%"=="1" goto start_server
 if "%choice%"=="2" goto stop_server
 if "%choice%"=="3" goto restart_server
-if "%choice%"=="4" exit /b 0
+if "%choice%"=="4" goto clean_install
+if "%choice%"=="5" exit /b 0
 goto menu
 
 :start_server
@@ -116,3 +118,28 @@ taskkill /FI "WINDOWTITLE eq WP Smart Poster Server*" /F >nul 2>&1
 echo [INFO] Waiting for port cleanup...
 timeout /t 2 /nobreak >nul
 goto start_server
+
+:clean_install
+cls
+echo ============================================================
+echo   Cleaning and Reinstalling Dependencies...
+echo ============================================================
+echo.
+echo [INFO] Deleting corrupted node_modules folder...
+echo This might take a minute. Please wait...
+if exist node_modules (
+    rd /s /q node_modules >nul 2>&1
+)
+echo [INFO] Reinstalling dependencies cleanly...
+call npm install
+if %errorlevel% neq 0 (
+    echo.
+    echo [ERROR] Clean install failed!
+    pause
+    goto menu
+)
+echo.
+echo [SUCCESS] Dependencies reinstalled successfully!
+echo Press any key to return to menu...
+pause >nul
+goto menu
