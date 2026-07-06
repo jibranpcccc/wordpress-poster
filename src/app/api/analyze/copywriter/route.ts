@@ -776,7 +776,9 @@ ${preAnalyzedImagesText}`;
             await tryGemini(selectedModel, k);
           }
         } else if (selectedModel && selectedModel.startsWith('cloudflare-')) {
-          const endpoint = selectedModel === 'cloudflare-llama-3.1-70b' 
+          const endpoint = selectedModel === 'cloudflare-llama-3.3-70b'
+            ? '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
+            : selectedModel === 'cloudflare-llama-3.1-70b' 
             ? '@cf/meta/llama-3.1-70b-instruct' 
             : '@cf/meta/llama-3.1-8b-instruct';
           await tryCloudflareAI(endpoint);
@@ -787,6 +789,7 @@ ${preAnalyzedImagesText}`;
         // 2. Fallback layer 1: Cloudflare Workers AI (high speed, 100% free, rotating 330+ keys)
         if (!responseData) {
           logDebug("Primary model failed. Starting Cloudflare fallbacks...");
+          await tryCloudflareAI('@cf/meta/llama-3.3-70b-instruct-fp8-fast');
           await tryCloudflareAI('@cf/meta/llama-3.1-70b-instruct');
           await tryCloudflareAI('@cf/meta/llama-3.1-8b-instruct');
         }
