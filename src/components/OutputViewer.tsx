@@ -45,6 +45,7 @@ export default function OutputViewer({ project, onUpdateProject }: OutputViewerP
   };
   const [isPosting, setIsPosting] = useState(false);
   const [postStatus, setPostStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [publishProgress, setPublishProgress] = useState('');
 
   const activeImages = project.images.filter(img => !img.doNotUse);
   const unusedImages = project.images.filter(img => img.doNotUse);
@@ -232,6 +233,7 @@ ${unusedText}`;
 
     setIsPosting(true);
     setPostStatus(null);
+    setPublishProgress('');
 
     // Save settings locally in database
     const updated = {
@@ -259,36 +261,63 @@ ${unusedText}`;
         })
       });
 
-      const resText = await res.text();
-      let resData;
-      try {
-        resData = JSON.parse(resText);
-      } catch (jsonErr) {
-        setPostStatus({
-          type: 'error',
-          message: `Server returned an invalid response (Status ${res.status}). Please check your server logs.`
-        });
-        return;
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Publish API error ${res.status}`);
       }
 
-      if (res.ok && resData.success) {
+      const reader = res.body?.getReader();
+      if (!reader) {
+        throw new Error("Could not initialize publish chunk reader.");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let successData = null;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const parsed = JSON.parse(line.trim());
+            if (parsed.type === 'progress') {
+              setPublishProgress(parsed.message);
+            } else if (parsed.type === 'success') {
+              successData = parsed.data;
+            } else if (parsed.type === 'error') {
+              throw new Error(parsed.error);
+            }
+          } catch (e: any) {
+            if (e.message && e.message !== 'Unexpected end of JSON input') {
+              throw e;
+            }
+          }
+        }
+      }
+
+      if (successData && successData.success) {
         setPostStatus({
           type: 'success',
-          message: `Post successfully created! View here: ${resData.link}`
+          message: `Post successfully created! View here: ${successData.link}`
         });
       } else {
-        setPostStatus({
-          type: 'error',
-          message: `WordPress Error: ${(resData && resData.error) || 'Failed to publish post.'}`
-        });
+        throw new Error("Failed to retrieve publication confirmation.");
       }
     } catch (e: any) {
       setPostStatus({
         type: 'error',
-        message: `Network Error: ${e.message || 'Failed to connect to WordPress'}`
+        message: `Publish Error: ${e.message || 'Failed to connect to WordPress'}`
       });
     } finally {
       setIsPosting(false);
+      setPublishProgress('');
     }
   };
 
@@ -440,7 +469,7 @@ ${unusedText}`;
 
             {isPosting && (
               <div className="text-[10px] font-semibold text-primary animate-pulse text-center pt-2">
-                Sending data to WordPress...
+                {publishProgress || 'Sending data to WordPress...'}
               </div>
             )}
 
