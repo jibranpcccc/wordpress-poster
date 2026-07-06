@@ -21,6 +21,19 @@ function getGeminiKeys(): string[] {
 const GEMINI_KEYS = getGeminiKeys();
 
 function getCloudflareCredentials() {
+  const jsonStr = process.env.CLOUDFLARE_CREDENTIALS_JSON;
+  if (jsonStr) {
+    try {
+      const cleanJson = jsonStr.replace(/^'+|'+$/g, '').trim();
+      const parsed = JSON.parse(cleanJson);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch (e) {
+      console.error("Failed to parse CLOUDFLARE_CREDENTIALS_JSON:", e);
+    }
+  }
+
   const creds: { key: string; acc: string; index: number }[] = [];
   for (let i = 1; i <= 400; i++) {
     const key = process.env[`CLOUDFLARE_API_KEY_${i}`];
