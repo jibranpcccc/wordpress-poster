@@ -19,6 +19,44 @@ function getGeminiKeys(): string[] {
 
 const GEMINI_KEYS = getGeminiKeys();
 
+function getCloudflareCredentials() {
+  // Try to load split credentials first
+  let consolidatedJsonStr = '';
+  let chunkIndex = 1;
+  while (true) {
+    const chunk = process.env[`CLOUDFLARE_CREDENTIALS_JSON_${chunkIndex}`];
+    if (!chunk) {
+      break;
+    }
+    consolidatedJsonStr += chunk;
+    chunkIndex++;
+  }
+
+  const jsonStr = consolidatedJsonStr || process.env.CLOUDFLARE_CREDENTIALS_JSON;
+  if (jsonStr) {
+    try {
+      const cleanJson = jsonStr.replace(/^'+|'+$/g, '').trim();
+      const parsed = JSON.parse(cleanJson);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch (e) {
+      console.error("Failed to parse CLOUDFLARE_CREDENTIALS_JSON:", e);
+    }
+  }
+
+  const creds: { key: string; acc: string; index: number }[] = [];
+  for (let i = 1; i <= 400; i++) {
+    const key = process.env[`CLOUDFLARE_API_KEY_${i}`];
+    const acc = process.env[`CLOUDFLARE_ACCOUNT_ID_${i}`];
+    if (key && acc) {
+      creds.push({ key: key.trim(), acc: acc.trim(), index: i });
+    }
+  }
+  return creds;
+}
+
+
 
 function escapeRawNewlinesInJsonString(jsonStr: string): string {
   let result = '';
@@ -350,14 +388,7 @@ async function analyzeImageWithCloudflare(
   }
 
   // Collect all Cloudflare credentials from environment with index tracking
-  const creds: { key: string; acc: string; index: number }[] = [];
-  for (let i = 1; i <= 150; i++) {
-    const key = process.env[`CLOUDFLARE_API_KEY_${i}`];
-    const acc = process.env[`CLOUDFLARE_ACCOUNT_ID_${i}`];
-    if (key && acc) {
-      creds.push({ key: key.trim(), acc: acc.trim(), index: i });
-    }
-  }
+  const creds = getCloudflareCredentials();
 
   if (creds.length === 0) {
     throw new Error("No Cloudflare credentials found in environment variables");
@@ -1428,19 +1459,98 @@ ${preAnalyzedImagesText}`;
           }
         };
 
+        // Helper: try Cloudflare AI
+        const tryCloudflareAI = async (modelEndpoint: string) => {
+          if (responseData) return;
+          
+          const creds = getCloudflareCredentials();
+          if (creds.length === 0) {
+            console.log("No Cloudflare credentials found for metadata copywriting.");
+            return;
+          }
+
+          // Shuffle credentials
+          const startIdx = Math.floor(Math.random() * creds.length);
+          const orderedCreds = [...creds.slice(startIdx), ...creds.slice(0, startIdx)];
+
+          const timeoutMs = 25000; // Allow 25 seconds for the 70B model if needed
+          const abortCtrl = new AbortController();
+          const timer = setTimeout(() => abortCtrl.abort(), timeoutMs);
+
+          sendProgress(75, `Submitting request to Cloudflare model: ${modelEndpoint}...`);
+
+          for (const cred of orderedCreds) {
+            try {
+              const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/${modelEndpoint}`;
+              const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${cred.key}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userContent }
+                  ]
+                }),
+                signal: abortCtrl.signal
+              });
+
+              if (res.status === 200) {
+                const data = await res.json();
+                const rawText = data.result?.response || data.result?.text || '';
+                if (rawText) {
+                  console.log(`Cloudflare model ${modelEndpoint} returned content. Parsing...`);
+                  processRawText(rawText, modelEndpoint);
+                  successModel = `cloudflare-${modelEndpoint.split('/').pop()}`;
+                  console.log(`Cloudflare model ${modelEndpoint} success using account index ${cred.index}!`);
+                  break;
+                } else {
+                  console.log(`Cloudflare account ${cred.index} returned empty content.`);
+                }
+              } else {
+                const errBody = await res.text().catch(() => '');
+                console.log(`Cloudflare account ${cred.index} returned status ${res.status}: ${errBody}`);
+              }
+            } catch (err: any) {
+              console.log(`Cloudflare account ${cred.index} failed for model ${modelEndpoint}: ${err.message}`);
+              if (err.name === 'AbortError') {
+                break;
+              }
+            }
+          }
+          clearTimeout(timer);
+        };
+
         // ── Execute model chain ──
 
-        // 1. First try the selected OpenCode model (e.g., deepseek-v4-flash-free)
-        if (selectedModel && !selectedModel.startsWith('gemini-') && selectedModel !== 'cloudflare-glm') {
+        // 1. First execution based on selected model type
+        if (selectedModel && selectedModel.startsWith('cloudflare-')) {
+          const endpoint = selectedModel === 'cloudflare-llama-3.3-70b'
+            ? '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
+            : selectedModel === 'cloudflare-llama-3.1-70b' 
+            ? '@cf/meta/llama-3.1-70b-instruct' 
+            : '@cf/meta/llama-3.1-8b-instruct';
+          await tryCloudflareAI(endpoint);
+        } else {
           await tryOpenCodeModel(selectedModel, 180000);
         }
 
-        // 2. If it failed or wasn't run, fall back to other OpenCode models
+        // 2. Fallback layer 1: Cloudflare Workers AI (high speed, 100% free, rotating 330+ keys)
         if (!responseData) {
+          console.log("Primary model failed. Starting Cloudflare fallbacks...");
+          await tryCloudflareAI('@cf/meta/llama-3.3-70b-instruct-fp8-fast');
+          await tryCloudflareAI('@cf/meta/llama-3.1-70b-instruct');
+          await tryCloudflareAI('@cf/meta/llama-3.1-8b-instruct');
+        }
+
+        // 3. Fallback layer 2: OpenCode default models
+        if (!responseData) {
+          console.log("Cloudflare fallbacks failed, starting OpenCode fallbacks...");
           const fallbackModels = [
-            'big-pickle',
-            'minimax-m3',
             'deepseek-v4-flash-free',
+            'minimax-m3',
             'nemotron-3-ultra-free',
             'north-mini-code-free'
           ];
