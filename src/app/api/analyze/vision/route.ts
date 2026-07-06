@@ -8,7 +8,19 @@ export const dynamic = 'force-dynamic';
 
 // Load Cloudflare credentials
 function getCloudflareCredentials() {
-  const jsonStr = process.env.CLOUDFLARE_CREDENTIALS_JSON;
+  // Try to load split credentials first
+  let consolidatedJsonStr = '';
+  let chunkIndex = 1;
+  while (true) {
+    const chunk = process.env[`CLOUDFLARE_CREDENTIALS_JSON_${chunkIndex}`];
+    if (!chunk) {
+      break;
+    }
+    consolidatedJsonStr += chunk;
+    chunkIndex++;
+  }
+
+  const jsonStr = consolidatedJsonStr || process.env.CLOUDFLARE_CREDENTIALS_JSON;
   if (jsonStr) {
     try {
       const cleanJson = jsonStr.replace(/^'+|'+$/g, '').trim();
