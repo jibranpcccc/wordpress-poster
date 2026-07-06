@@ -236,12 +236,13 @@ export async function POST(request: Request) {
             }
           } catch (mediaErr: any) {
             console.error(`Failed uploading image ${img.originalName} to WordPress:`, mediaErr);
+            sendProgress(`Warning: Failed to upload image "${img.originalName}": ${mediaErr.message || mediaErr}`);
             return null;
           }
         };
 
         const uploadResults: any[] = [];
-        const wpChunkSize = 4;
+        const wpChunkSize = 10;
         for (let i = 0; i < activeImages.length; i += wpChunkSize) {
           const chunk = activeImages.slice(i, i + wpChunkSize);
           const chunkPromises = chunk.map((img, cIdx) => uploadSingleImage(img, i + cIdx, activeImages.length));

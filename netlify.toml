@@ -5,7 +5,7 @@
 [build.environment]
   NODE_VERSION = "20"
 
-[functions]
+[functions."*"]
   timeout = 26
 
 [[plugins]]
