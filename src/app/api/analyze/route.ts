@@ -1430,24 +1430,8 @@ ${preAnalyzedImagesText}`;
 
         // ── Execute model chain ──
 
-        // 1. First execution based on selected model type (Gemini or OpenCode)
-        if (selectedModel && selectedModel.startsWith('gemini-')) {
-          const keys = customGeminiKey ? [customGeminiKey] : GEMINI_KEYS;
-          for (const k of keys) {
-            if (responseData) break;
-            try {
-              sendProgress(75, `Submitting request to Gemini model: ${selectedModel}...`);
-              const rawText = await tryGeminiKey(selectedModel, k);
-              if (rawText) {
-                console.log(`Success with Gemini model: ${selectedModel}`);
-                processRawText(rawText, selectedModel);
-              }
-            } catch (err: any) {
-              console.warn(`Gemini model ${selectedModel} failed: ${err.message}`);
-              lastError = err;
-            }
-          }
-        } else if (selectedModel && !selectedModel.startsWith('cloudflare-') && selectedModel !== 'cloudflare-glm') {
+        // 1. First try the selected OpenCode model (e.g., deepseek-v4-flash-free)
+        if (selectedModel && !selectedModel.startsWith('gemini-') && selectedModel !== 'cloudflare-glm') {
           await tryOpenCodeModel(selectedModel, 180000);
         }
 
@@ -1464,27 +1448,6 @@ ${preAnalyzedImagesText}`;
             if (responseData) break;
             if (model !== selectedModel) {
               await tryOpenCodeModel(model, 180000);
-            }
-          }
-        }
-
-        // 3. Fallback layer 2: Gemini models
-        if (!responseData) {
-          const geminiModels = ['gemini-2.5-flash', 'gemini-1.5-flash'];
-          const keys = customGeminiKey ? [customGeminiKey] : GEMINI_KEYS;
-          for (const model of geminiModels) {
-            for (const k of keys) {
-              if (responseData) break;
-              try {
-                sendProgress(80, `Submitting fallback request to Gemini model: ${model}...`);
-                const rawText = await tryGeminiKey(model, k);
-                if (rawText) {
-                  console.log(`Success with fallback Gemini model: ${model}`);
-                  processRawText(rawText, model);
-                }
-              } catch (err: any) {
-                console.warn(`Fallback Gemini model ${model} failed: ${err.message}`);
-              }
             }
           }
         }

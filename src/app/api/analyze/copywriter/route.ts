@@ -589,55 +589,7 @@ ${preAnalyzedImagesText}`;
         let successModel = '';
         let lastError: any = null;
 
-        // Helper: try Gemini
-        const tryGemini = async (geminiModel: string, apiKey: string) => {
-          if (responseData) return;
-          if (request.signal.aborted) {
-            logDebug(`Request aborted by client. Skipping Gemini model ${geminiModel}.`);
-            return;
-          }
-          const combined = makeCombinedSignal(request.signal, 15000);
-          try {
-            sendProgress(70, `Submitting request to Gemini model: ${geminiModel}...`);
-            const geminiRes = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  contents: [{ role: 'user', parts: [{ text: systemPrompt + "\n\n" + userContent }] }],
-                  generationConfig: { 
-                    responseMimeType: 'application/json', 
-                    temperature: 0.2,
-                    maxOutputTokens: 4096
-                  }
-                }),
-                signal: combined.signal
-              }
-            );
-            logDebug(`Gemini response status: ${geminiRes.status}`);
-            if (geminiRes.status === 200) {
-              const geminiData = await geminiRes.json();
-              const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-              if (rawText) {
-                logDebug(`Gemini model ${geminiModel} returned content. Parsing...`);
-                responseData = extractFlexibleJson(rawText);
-                successModel = geminiModel;
-                logDebug(`Gemini model ${geminiModel} success!`);
-              } else {
-                logDebug(`Gemini model ${geminiModel} returned empty content.`);
-              }
-            } else {
-              const errText = await geminiRes.text();
-              logDebug(`Gemini model ${geminiModel} error body: ${errText.substring(0, 200)}`);
-            }
-          } catch (err: any) {
-            logDebug(`Gemini text model ${geminiModel} failed: ${err.message}`);
-            lastError = err;
-          } finally {
-            combined.cleanup();
-          }
-        };
+
 
         // Helper: try OpenCode
         const tryOpenCodeModel = async (modelName: string) => {
@@ -769,13 +721,7 @@ ${preAnalyzedImagesText}`;
         };
 
         // 1. First execution based on selected model type
-        if (selectedModel && selectedModel.startsWith('gemini-')) {
-          const keys = customGeminiKey ? [customGeminiKey] : GEMINI_KEYS;
-          for (const k of keys) {
-            if (responseData) break;
-            await tryGemini(selectedModel, k);
-          }
-        } else if (selectedModel && selectedModel.startsWith('cloudflare-')) {
+        if (selectedModel && selectedModel.startsWith('cloudflare-')) {
           const endpoint = selectedModel === 'cloudflare-llama-3.3-70b'
             ? '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
             : selectedModel === 'cloudflare-llama-3.1-70b' 
@@ -807,19 +753,6 @@ ${preAnalyzedImagesText}`;
             if (responseData) break;
             if (m !== selectedModel) {
               await tryOpenCodeModel(m);
-            }
-          }
-        }
-
-        // 4. Fallback layer 3: Gemini models
-        if (!responseData) {
-          logDebug("OpenCode fallbacks failed, starting Gemini fallbacks...");
-          const geminiModels = ['gemini-2.5-flash', 'gemini-1.5-flash'];
-          const keys = customGeminiKey ? [customGeminiKey] : GEMINI_KEYS;
-          for (const model of geminiModels) {
-            for (const k of keys) {
-              if (responseData) break;
-              await tryGemini(model, k);
             }
           }
         }

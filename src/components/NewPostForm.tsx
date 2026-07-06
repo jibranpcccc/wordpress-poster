@@ -509,9 +509,6 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
               <option value="cloudflare-llama-3.3-70b">☁️ Cloudflare Llama 3.3 70B (Recommended - State-of-the-Art, 0.7s Fast & Stable)</option>
               <option value="cloudflare-llama-3.1-70b">☁️ Cloudflare Llama 3.1 70B (0.7s Ultra Fast & 100% Stable)</option>
               <option value="cloudflare-llama-3.1-8b">☁️ Cloudflare Llama 3.1 8B (0.4s Super Fast)</option>
-              <option value="gemini-2.5-pro">💎 Gemini 2.5 Pro (Google - Ultimate SEO Copywriting & Reasoning)</option>
-              <option value="gemini-2.5-flash">⚡ Gemini 2.5 Flash (Google - Super Fast & Smart)</option>
-              <option value="gemini-1.5-pro">💎 Gemini 1.5 Pro (Google - High Quality)</option>
               <option value="deepseek-v4-flash-free">🌟 DeepSeek V4 Flash (OpenCode - Ultra Fast & Stable)</option>
               <option value="minimax-m3">⚡ Minimax M3 (OpenCode - Ultra Fast & 100% Stable)</option>
               <option value="big-pickle">🥒 Big Pickle (OpenCode - SEO Reasoning, Very Slow - Requires 2 min)</option>
@@ -543,20 +540,6 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
             />
             <p className="text-[10px] text-muted mt-1.5">
               Saved locally in your browser. Leave blank if your local server already has the key configured in `.env` or system variables.
-            </p>
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">Gemini API Key (Optional)</label>
-            <input
-              type="password"
-              value={customGeminiKey}
-              onChange={(e) => handleGeminiKeyChange(e.target.value)}
-              placeholder="Leave blank to use server .env key"
-              className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-slate-50/30"
-            />
-            <p className="text-[10px] text-muted mt-1.5">
-              Used for visual analysis & direct copywriting. Get a free key in 10 seconds at <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:underline font-medium">Google AI Studio</a>.
             </p>
           </div>
         </div>
