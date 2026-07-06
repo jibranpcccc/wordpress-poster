@@ -508,7 +508,10 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
             >
               <option value="cloudflare-llama-3.3-70b">☁️ Cloudflare Llama 3.3 70B (Recommended - State-of-the-Art, 0.7s Fast & Stable)</option>
               <option value="cloudflare-llama-3.1-70b">☁️ Cloudflare Llama 3.1 70B (0.7s Ultra Fast & 100% Stable)</option>
-              <option value="cloudflare-llama-3.1-8b">☁️ Cloudflare Llama 3.1 8B (Recommended - 0.4s Super Fast)</option>
+              <option value="cloudflare-llama-3.1-8b">☁️ Cloudflare Llama 3.1 8B (0.4s Super Fast)</option>
+              <option value="gemini-2.5-pro">💎 Gemini 2.5 Pro (Google - Ultimate SEO Copywriting & Reasoning)</option>
+              <option value="gemini-2.5-flash">⚡ Gemini 2.5 Flash (Google - Super Fast & Smart)</option>
+              <option value="gemini-1.5-pro">💎 Gemini 1.5 Pro (Google - High Quality)</option>
               <option value="deepseek-v4-flash-free">🌟 DeepSeek V4 Flash (OpenCode - Ultra Fast & Stable)</option>
               <option value="minimax-m3">⚡ Minimax M3 (OpenCode - Ultra Fast & 100% Stable)</option>
               <option value="big-pickle">🥒 Big Pickle (OpenCode - SEO Reasoning, Very Slow - Requires 2 min)</option>
