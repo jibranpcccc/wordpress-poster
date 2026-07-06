@@ -28,7 +28,7 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
   const [category, setCategory] = useState('');
   const [tags, setTags] = useState('');
   const [articleContent, setArticleContent] = useState('');
-  const [model, setModel] = useState('deepseek-v4-flash-free');
+  const [model, setModel] = useState('cloudflare-llama-3.1-70b');
   const [visionProvider, setVisionProvider] = useState('cloudflare');
   
   // Custom SEO states
@@ -506,7 +506,9 @@ export default function NewPostForm({ onAnalyze, isAnalyzing }: NewPostFormProps
               onChange={(e) => setModel(e.target.value)}
               className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-slate-50/30 font-medium text-slate-800"
             >
-              <option value="deepseek-v4-flash-free">🌟 DeepSeek V4 Flash (OpenCode - Recommended, Ultra Fast & Stable)</option>
+              <option value="cloudflare-llama-3.1-70b">☁️ Cloudflare Llama 3.1 70B (Recommended - 0.7s Ultra Fast & 100% Stable)</option>
+              <option value="cloudflare-llama-3.1-8b">☁️ Cloudflare Llama 3.1 8B (Recommended - 0.4s Super Fast)</option>
+              <option value="deepseek-v4-flash-free">🌟 DeepSeek V4 Flash (OpenCode - Ultra Fast & Stable)</option>
               <option value="minimax-m3">⚡ Minimax M3 (OpenCode - Ultra Fast & 100% Stable)</option>
               <option value="big-pickle">🥒 Big Pickle (OpenCode - SEO Reasoning, Very Slow - Requires 2 min)</option>
               <option value="nemotron-3-ultra-free">🚀 Nemotron 3 Ultra (OpenCode - Free)</option>

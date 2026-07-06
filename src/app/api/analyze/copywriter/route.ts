@@ -20,6 +20,18 @@ function getGeminiKeys(): string[] {
 
 const GEMINI_KEYS = getGeminiKeys();
 
+function getCloudflareCredentials() {
+  const creds: { key: string; acc: string; index: number }[] = [];
+  for (let i = 1; i <= 400; i++) {
+    const key = process.env[`CLOUDFLARE_API_KEY_${i}`];
+    const acc = process.env[`CLOUDFLARE_ACCOUNT_ID_${i}`];
+    if (key && acc) {
+      creds.push({ key: key.trim(), acc: acc.trim(), index: i });
+    }
+  }
+  return creds;
+}
+
 function escapeRawNewlinesInJsonString(jsonStr: string): string {
   let result = '';
   let inString = false;
@@ -663,25 +675,103 @@ ${preAnalyzedImagesText}`;
           }
         };
 
-        // 1. If Gemini model is selected, try that first
+        // Helper: try Cloudflare AI
+        const tryCloudflareAI = async (modelEndpoint: string) => {
+          if (responseData) return;
+          if (request.signal.aborted) {
+            logDebug(`Request aborted by client. Skipping Cloudflare model ${modelEndpoint}.`);
+            return;
+          }
+
+          const creds = getCloudflareCredentials();
+          if (creds.length === 0) {
+            logDebug("No Cloudflare credentials found for copywriting.");
+            return;
+          }
+
+          // Shuffle credentials
+          const startIdx = Math.floor(Math.random() * creds.length);
+          const orderedCreds = [...creds.slice(startIdx), ...creds.slice(0, startIdx)];
+
+          const timeoutMs = 25000; // Allow 25 seconds for the 70B model if needed
+          const combined = makeCombinedSignal(request.signal, timeoutMs);
+
+          sendProgress(75, `Submitting request to Cloudflare model: ${modelEndpoint}...`);
+
+          for (const cred of orderedCreds) {
+            if (request.signal.aborted) break;
+            try {
+              const url = `https://api.cloudflare.com/client/v4/accounts/${cred.acc}/ai/run/${modelEndpoint}`;
+              const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${cred.key}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userContent }
+                  ]
+                }),
+                signal: combined.signal
+              });
+
+              if (res.status === 200) {
+                const data = await res.json();
+                const rawText = data.result?.response || data.result?.text || '';
+                if (rawText) {
+                  logDebug(`Cloudflare model ${modelEndpoint} returned content. Parsing...`);
+                  responseData = extractFlexibleJson(rawText);
+                  successModel = `cloudflare-${modelEndpoint.split('/').pop()}`;
+                  logDebug(`Cloudflare model ${modelEndpoint} success using account index ${cred.index}!`);
+                  break;
+                } else {
+                  logDebug(`Cloudflare account ${cred.index} returned empty content.`);
+                }
+              } else {
+                const errBody = await res.text().catch(() => '');
+                logDebug(`Cloudflare account ${cred.index} returned status ${res.status}: ${errBody}`);
+              }
+            } catch (err: any) {
+              logDebug(`Cloudflare account ${cred.index} failed for model ${modelEndpoint}: ${err.message}`);
+              if (err.name === 'AbortError') {
+                break;
+              }
+            }
+          }
+          combined.cleanup();
+        };
+
+        // 1. First execution based on selected model type
         if (selectedModel && selectedModel.startsWith('gemini-')) {
           const keys = customGeminiKey ? [customGeminiKey] : GEMINI_KEYS;
           for (const k of keys) {
             if (responseData) break;
             await tryGemini(selectedModel, k);
           }
+        } else if (selectedModel && selectedModel.startsWith('cloudflare-')) {
+          const endpoint = selectedModel === 'cloudflare-llama-3.1-70b' 
+            ? '@cf/meta/llama-3.1-70b-instruct' 
+            : '@cf/meta/llama-3.1-8b-instruct';
+          await tryCloudflareAI(endpoint);
         } else {
-          // 2. Otherwise try the selected OpenCode model
           await tryOpenCodeModel(selectedModel);
         }
 
-        // 3. Fallback chain: OpenCode default models
+        // 2. Fallback layer 1: Cloudflare Workers AI (high speed, 100% free, rotating 330+ keys)
         if (!responseData) {
-          logDebug("Primary model failed, starting OpenCode fallbacks...");
+          logDebug("Primary model failed. Starting Cloudflare fallbacks...");
+          await tryCloudflareAI('@cf/meta/llama-3.1-70b-instruct');
+          await tryCloudflareAI('@cf/meta/llama-3.1-8b-instruct');
+        }
+
+        // 3. Fallback layer 2: OpenCode default models
+        if (!responseData) {
+          logDebug("Cloudflare fallbacks failed, starting OpenCode fallbacks...");
           const fallbackModels = [
-            'minimax-m3',
-            'big-pickle',
             'deepseek-v4-flash-free',
+            'minimax-m3',
             'nemotron-3-ultra-free',
             'north-mini-code-free'
           ];
@@ -693,7 +783,7 @@ ${preAnalyzedImagesText}`;
           }
         }
 
-        // 4. Fallback chain: Gemini models
+        // 4. Fallback layer 3: Gemini models
         if (!responseData) {
           logDebug("OpenCode fallbacks failed, starting Gemini fallbacks...");
           const geminiModels = ['gemini-2.5-flash', 'gemini-1.5-flash'];

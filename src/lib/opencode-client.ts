@@ -4,7 +4,7 @@ import { OpenAI } from 'openai';
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 // The hardcoded working OpenCode API key — used as guaranteed fallback on any laptop
-const OPENCODE_DEFAULT_KEY = 'sk-X8nDa9FRQp3nKXTPCvEJx0BXGDunw4xSDBR1ksclmKU3kkRgt8iDuRd72YZXaeIf';
+const OPENCODE_DEFAULT_KEY = 'sk-Bo7Hug0OdQiDgapjSsF9oONIlKeekaOZiIpdNFrdbDvvDYGSXo67NydYMqtgvU7N';
 const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1';
 
 export function getApiKey(): string {

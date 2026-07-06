@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 // Load Cloudflare credentials
 function getCloudflareCredentials() {
   const creds: { key: string; acc: string; index: number }[] = [];
-  for (let i = 1; i <= 150; i++) {
+  for (let i = 1; i <= 400; i++) {
     const key = process.env[`CLOUDFLARE_API_KEY_${i}`];
     const acc = process.env[`CLOUDFLARE_ACCOUNT_ID_${i}`];
     if (key && acc) {
