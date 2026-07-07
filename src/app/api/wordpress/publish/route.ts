@@ -3,6 +3,9 @@ import fs from 'fs';
 import path from 'path';
 import { db, Project, ImageDetail } from '@/lib/db';
 
+// Per-fetch timeout: each individual WordPress API call gets 8 seconds max
+const FETCH_TIMEOUT_MS = 8000;
+
 async function uploadAndSetImageSEO(
   fileBuffer: Buffer,
   ext: string,
@@ -22,7 +25,8 @@ async function uploadAndSetImageSEO(
       'Content-Disposition': `attachment; filename="${img.seoFilename}"`,
       'Content-Type': mimeType
     },
-    body: fileBuffer as any
+    body: fileBuffer as any,
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
   });
 
   if (!uploadRes.ok) {
@@ -48,7 +52,8 @@ async function uploadAndSetImageSEO(
       caption: img.caption || '',
       title: img.seoFilename.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "),
       description: img.notes || ''
-    })
+    }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
   });
 
   if (!updateRes.ok) {
@@ -70,7 +75,7 @@ async function resolveTagIds(tagsStr: string, wpUrl: string, authHeader: string)
       // 1. Search if tag already exists
       const searchRes = await fetch(`${wpUrl}/wp-json/wp/v2/tags?search=${encodeURIComponent(name)}`, {
         headers: { 'Authorization': authHeader },
-        signal: AbortSignal.timeout(6000)
+        signal: AbortSignal.timeout(5000)
       });
       if (searchRes.ok) {
         const existingTags = await searchRes.json();
@@ -90,7 +95,7 @@ async function resolveTagIds(tagsStr: string, wpUrl: string, authHeader: string)
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ name: name }),
-        signal: AbortSignal.timeout(6000)
+        signal: AbortSignal.timeout(5000)
       });
       if (createRes.ok) {
         const newTag = await createRes.json();
@@ -124,8 +129,30 @@ export async function POST(request: Request) {
 
   const stream = new ReadableStream({
     async start(controller) {
-      const sendProgress = (message: string) => {
-        controller.enqueue(encoder.encode(JSON.stringify({ type: 'progress', message }) + '\n'));
+      // Track if controller has been closed to prevent double-close
+      let controllerClosed = false;
+
+      const sendChunk = (data: object) => {
+        if (controllerClosed) return;
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(data) + '\n'));
+        } catch (e) {
+          // Controller may already be closed in error scenarios
+        }
+      };
+
+      const sendProgress = (message: string) => sendChunk({ type: 'progress', message });
+      const sendKeepalive = () => sendChunk({ type: 'ping' });
+
+      // Keepalive: send a ping every 2 seconds so Netlify/CDN doesn't kill the idle connection
+      const keepaliveInterval = setInterval(sendKeepalive, 2000);
+
+      const cleanup = () => {
+        clearInterval(keepaliveInterval);
+        if (!controllerClosed) {
+          controllerClosed = true;
+          try { controller.close(); } catch (e) {}
+        }
       };
 
       try {
@@ -138,19 +165,23 @@ export async function POST(request: Request) {
         const cleanWpUrl = wpUrl.replace(/\/$/, "");
         const authHeader = `Basic ${Buffer.from(`${wpUser}:${wpPassword}`).toString('base64')}`;
 
-        // 2. Identify active images and copy path references
+        // 2. Identify active images
         const activeImages = project.images.filter(img => !img.doNotUse);
         const featuredImage = activeImages.find(img => img.isFeatured);
 
         const uploadDir = path.join(process.cwd(), 'public');
         const wpImageMap: { [localId: string]: { id: number; url: string } } = {};
 
-        // 3. Upload all active images to WP Media library in chunks of 4
-        const uploadSingleImage = async (img: ImageDetail, idx: number, total: number) => {
+        // 3. Upload images SEQUENTIALLY to stay within Netlify's 26s function timeout.
+        //    Each image gets up to ~8s (2 API calls × 4s each). 10 images = ~80s worst-case,
+        //    but in practice WordPress media uploads are fast (~1-2s each), so 10 images ≈ 15-20s total.
+        sendProgress(`Uploading ${activeImages.length} image(s) to WordPress...`);
+
+        for (let idx = 0; idx < activeImages.length; idx++) {
+          const img = activeImages[idx];
           try {
             if (img.wpMediaId) {
-              sendProgress(`Updating pre-uploaded image ${idx + 1}/${total} ("${img.originalName}")...`);
-              // Update media detail with Alt Text, Caption, and Title in WP Media Library
+              sendProgress(`Updating pre-uploaded image ${idx + 1}/${activeImages.length} ("${img.originalName}")...`);
               const updateRes = await fetch(`${cleanWpUrl}/wp-json/wp/v2/media/${img.wpMediaId}`, {
                 method: 'POST',
                 headers: {
@@ -162,36 +193,38 @@ export async function POST(request: Request) {
                   caption: img.caption || '',
                   title: img.seoFilename.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "),
                   description: img.notes || ''
-                })
+                }),
+                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
               });
 
               let liveUrl = img.localPath;
-              if (!updateRes.ok) {
+              if (updateRes.ok) {
+                try {
+                  const mediaData = await updateRes.json();
+                  liveUrl = mediaData.source_url || img.localPath;
+                } catch (e) {}
+              } else {
                 console.warn(`[WP Media Warning] Failed to update SEO meta for pre-uploaded media ID ${img.wpMediaId}: ${updateRes.statusText}`);
                 try {
                   const getRes = await fetch(`${cleanWpUrl}/wp-json/wp/v2/media/${img.wpMediaId}`, {
-                    headers: { 'Authorization': authHeader }
+                    headers: { 'Authorization': authHeader },
+                    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
                   });
                   if (getRes.ok) {
                     const mediaData = await getRes.json();
                     liveUrl = mediaData.source_url || img.localPath;
                   }
                 } catch (e) {}
-              } else {
-                console.log(`[WP Media] SEO metadata updated successfully for pre-uploaded ID ${img.wpMediaId}`);
-                try {
-                  const mediaData = await updateRes.json();
-                  liveUrl = mediaData.source_url || img.localPath;
-                } catch (e) {}
               }
 
-              return { localId: img.id, wpMedia: { id: img.wpMediaId, url: liveUrl } };
+              wpImageMap[img.id] = { id: img.wpMediaId, url: liveUrl };
+              continue;
             }
 
             let fileBuffer: Buffer | null = null;
             let ext = 'jpg';
 
-            // Check if it's a Firestore image URL (contains ?id=)
+            // Load from Firestore
             if (img.localPath.includes('?id=')) {
               const urlObj = new URL(img.localPath, 'http://localhost');
               const imageId = urlObj.searchParams.get('id');
@@ -205,16 +238,14 @@ export async function POST(request: Request) {
               }
             }
 
-            // Fallback to local files
+            // Fallback: local files
             if (!fileBuffer) {
               let checkPath = img.localPath;
               if (checkPath.includes('?id=')) {
                 try {
                   const urlObj = new URL(checkPath, 'http://localhost');
                   const imageId = urlObj.searchParams.get('id');
-                  if (imageId) {
-                    checkPath = `/uploads/${imageId}`;
-                  }
+                  if (imageId) checkPath = `/uploads/${imageId}`;
                 } catch (e) {}
               }
               const fullPath = path.join(uploadDir, checkPath.replace(/^\//, ''));
@@ -228,33 +259,19 @@ export async function POST(request: Request) {
             }
 
             if (fileBuffer) {
-              sendProgress(`Uploading image ${idx + 1}/${total} ("${img.originalName}")...`);
+              sendProgress(`Uploading image ${idx + 1}/${activeImages.length} ("${img.originalName}")...`);
               const wpMedia = await uploadAndSetImageSEO(fileBuffer, ext, img, cleanWpUrl, authHeader);
-              return { localId: img.id, wpMedia };
+              wpImageMap[img.id] = wpMedia;
             } else {
-              throw new Error("No image buffer found");
+              console.warn(`[WP Media] Skipping image "${img.originalName}" — no buffer available.`);
+              sendProgress(`Warning: Skipping image "${img.originalName}" — could not load file.`);
             }
           } catch (mediaErr: any) {
             console.error(`Failed uploading image ${img.originalName} to WordPress:`, mediaErr);
-            sendProgress(`Warning: Failed to upload image "${img.originalName}": ${mediaErr.message || mediaErr}`);
-            return null;
+            sendProgress(`Warning: Could not upload "${img.originalName}" (${mediaErr.message || mediaErr}). Continuing...`);
+            // Non-fatal: keep going with remaining images
           }
-        };
-
-        const uploadResults: any[] = [];
-        const wpChunkSize = 10;
-        for (let i = 0; i < activeImages.length; i += wpChunkSize) {
-          const chunk = activeImages.slice(i, i + wpChunkSize);
-          const chunkPromises = chunk.map((img, cIdx) => uploadSingleImage(img, i + cIdx, activeImages.length));
-          const chunkRes = await Promise.all(chunkPromises);
-          uploadResults.push(...chunkRes);
         }
-        
-        uploadResults.forEach(res => {
-          if (res) {
-            wpImageMap[res.localId] = res.wpMedia;
-          }
-        });
 
         // 4. Determine featured media ID
         let wpFeaturedMediaId = 0;
@@ -373,7 +390,8 @@ export async function POST(request: Request) {
             'Authorization': authHeader,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify(postPayload)
+          body: JSON.stringify(postPayload),
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
         });
 
         if (!postRes.ok) {
@@ -403,23 +421,23 @@ export async function POST(request: Request) {
         } catch (cleanErr) {}
 
         sendProgress("Publish completed successfully!");
-        controller.enqueue(encoder.encode(JSON.stringify({
+        sendChunk({
           type: 'success',
           data: {
             success: true,
             link: livePost.link,
             id: livePost.id
           }
-        }) + '\n'));
+        });
 
       } catch (e: any) {
         console.error("WordPress publish error:", e);
-        controller.enqueue(encoder.encode(JSON.stringify({
+        sendChunk({
           type: 'error',
           error: e.message || 'Failed to publish post to WordPress'
-        }) + '\n'));
+        });
       } finally {
-        controller.close();
+        cleanup();
       }
     }
   });
@@ -432,4 +450,3 @@ export async function POST(request: Request) {
     },
   });
 }
-
