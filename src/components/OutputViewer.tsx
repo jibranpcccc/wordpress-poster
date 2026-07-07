@@ -224,7 +224,8 @@ ${unusedText}`;
     URL.revokeObjectURL(url);
   };
 
-  // Publish to WordPress REST API
+  // Publish to WordPress REST API — uses client-side direct publishing
+  // (browser calls WordPress directly from user's own IP, bypassing server IP blocks)
   const handlePublish = async (status: 'draft' | 'publish') => {
     if (!wpUrl || !wpUser || !wpPassword) {
       alert('Please fill in WordPress URL, username, and Application Password in Settings.');
@@ -235,109 +236,212 @@ ${unusedText}`;
     setPostStatus(null);
     setPublishProgress('');
 
-    // Save settings locally in database
     const updated = {
       ...project,
-      wpSettings: {
-        siteUrl: wpUrl,
-        username: wpUser,
-        hasPassword: true
-      }
+      wpSettings: { siteUrl: wpUrl, username: wpUser, hasPassword: true }
     };
     onUpdateProject(updated);
 
     try {
-      const res = await fetch('/api/wordpress/publish', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          projectId: project.id,
-          wpUrl,
-          wpUser,
-          wpPassword,
-          status
-        })
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `Publish API error ${res.status}`);
+      // Step 1: Fetch project data + image blobs from our server
+      setPublishProgress('Fetching project data...');
+      const dataRes = await fetch(`/api/wordpress/publish-data?projectId=${project.id}`);
+      if (!dataRes.ok) {
+        const e = await dataRes.json().catch(() => ({}));
+        throw new Error(e.error || 'Could not load project data');
       }
+      const { project: fullProject } = await dataRes.json();
 
-      const reader = res.body?.getReader();
-      if (!reader) {
-        throw new Error("Could not initialize publish chunk reader.");
-      }
+      const cleanWpUrl = wpUrl.replace(/\/$/, '');
+      const authHeader = 'Basic ' + btoa(`${wpUser}:${wpPassword}`);
 
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let successData: any = null;
-      let streamError: string | null = null;
+      const activeImages = fullProject.images.filter((img: any) => !img.doNotUse);
+      const featuredImage = activeImages.find((img: any) => img.isFeatured);
+      const wpImageMap: Record<string, { id: number; url: string }> = {};
 
-      const parseLines = (text: string) => {
-        buffer += text;
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // keep incomplete last line in buffer
+      // Step 2: Upload images directly from browser to WordPress
+      // The browser uses the USER's own IP — no server IP blocks apply
+      setPublishProgress(`Uploading ${activeImages.length} image(s) to WordPress...`);
 
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          let parsed: any = null;
+      const BATCH = 3;
+      for (let i = 0; i < activeImages.length; i += BATCH) {
+        const batch = activeImages.slice(i, i + BATCH);
+        const batchNum = Math.floor(i / BATCH) + 1;
+        const totalBatches = Math.ceil(activeImages.length / BATCH);
+        setPublishProgress(`Uploading images batch ${batchNum}/${totalBatches}...`);
+
+        await Promise.all(batch.map(async (img: any) => {
           try {
-            parsed = JSON.parse(line.trim());
-          } catch (parseErr) {
-            continue; // skip non-JSON lines silently
+            if (img.wpMediaId) {
+              wpImageMap[img.id] = { id: img.wpMediaId, url: img.localPath };
+              return;
+            }
+            if (!img.base64Data) return;
+
+            const mimeType = img.mimeType || 'image/jpeg';
+            const byteChars = atob(img.base64Data);
+            const byteArr = new Uint8Array(byteChars.length);
+            for (let j = 0; j < byteChars.length; j++) byteArr[j] = byteChars.charCodeAt(j);
+            const blob = new Blob([byteArr], { type: mimeType });
+
+            const upRes = await fetch(`${cleanWpUrl}/wp-json/wp/v2/media`, {
+              method: 'POST',
+              headers: {
+                'Authorization': authHeader,
+                'Content-Disposition': `attachment; filename="${img.seoFilename}"`,
+                'Content-Type': mimeType,
+              },
+              body: blob,
+            });
+
+            if (!upRes.ok) {
+              console.warn(`Image upload failed for ${img.originalName}: ${upRes.status}`);
+              return;
+            }
+            const media = await upRes.json();
+
+            // Update SEO metadata (fire and forget)
+            fetch(`${cleanWpUrl}/wp-json/wp/v2/media/${media.id}`, {
+              method: 'POST',
+              headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                alt_text: img.altText || '',
+                caption: img.caption || '',
+                title: img.seoFilename.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' '),
+                description: img.notes || '',
+              }),
+            }).catch(() => {});
+
+            wpImageMap[img.id] = { id: media.id, url: media.source_url };
+          } catch (imgErr: any) {
+            console.warn(`Skipping image ${img.originalName}:`, imgErr.message);
           }
-          if (parsed.type === 'progress') {
-            setPublishProgress(parsed.message);
-          } else if (parsed.type === 'success') {
-            successData = parsed.data;
-          } else if (parsed.type === 'error') {
-            streamError = parsed.error;
-            return false; // signal: stop reading
-          }
-          // 'ping' events are ignored (keepalive only)
+        }));
+      }
+
+      // Step 3: Resolve tags
+      setPublishProgress('Resolving tags...');
+      const tagIds: number[] = [];
+      if (fullProject.tags) {
+        const tagNames = fullProject.tags.split(',').map((t: string) => t.trim()).filter(Boolean);
+        for (const name of tagNames) {
+          try {
+            const searchRes = await fetch(
+              `${cleanWpUrl}/wp-json/wp/v2/tags?search=${encodeURIComponent(name)}`,
+              { headers: { 'Authorization': authHeader } }
+            );
+            if (searchRes.ok) {
+              const existing = await searchRes.json();
+              const match = Array.isArray(existing) && existing.find((t: any) => t.name.toLowerCase() === name.toLowerCase());
+              if (match) { tagIds.push(match.id); continue; }
+            }
+            const createRes = await fetch(`${cleanWpUrl}/wp-json/wp/v2/tags`, {
+              method: 'POST',
+              headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name }),
+            });
+            if (createRes.ok) { const t = await createRes.json(); tagIds.push(t.id); }
+          } catch (e) {}
         }
-        return true; // signal: keep reading
+      }
+
+      // Step 4: Build Gutenberg HTML content
+      const stripPlaceholders = (text: string) => text.split('\n').filter(line => {
+        const c = line.trim().replace(/^[\*\s_"'""[]+/, '').toLowerCase();
+        if (c.startsWith('image:') || c.startsWith('[image:') || c.startsWith('alt text:') ||
+            c.startsWith('alt tag:') || c.startsWith('caption:') || c.startsWith('filename:') ||
+            c.startsWith('seo filename:')) return false;
+        const t = line.trim();
+        if (t === '*' || t === '**' || t === '_' || t === '__') return false;
+        return true;
+      }).join('\n');
+
+      const mdToHtml = (text: string) => text
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2">$1</a>');
+
+      const isHeading = (text: string) => {
+        const t = text.trim();
+        if (!t || t.length > 85) return false;
+        if (t.startsWith('#')) return true;
+        if (/[.?!]$/.test(t)) return false;
+        if (t.includes('<') && t.includes('>')) return false;
+        if (!/^[A-Z0-9"'""]/.test(t)) return false;
+        return t.split(/\s+/).length <= 12;
       };
 
-      while (true) {
-        const { value, done } = await reader.read();
+      const articleText = stripPlaceholders(fullProject.formattedContent || fullProject.articleContent);
+      const paragraphs = articleText.split('\n').map((p: string) => p.trim()).filter(Boolean);
+      let htmlContent = '';
 
-        if (value) {
-          const text = decoder.decode(value, { stream: !done });
-          const shouldContinue = parseLines(text);
-          if (!shouldContinue) break;
+      paragraphs.forEach((p: string, idx: number) => {
+        const t = p.trim();
+        if (t.startsWith('<!-- wp:') || t.startsWith('<!-- /wp:') || t.startsWith('<figure') ||
+            t.startsWith('</figure>') || t.startsWith('<img') || t.startsWith('<figcaption')) {
+          htmlContent += t + '\n';
+        } else if (t.startsWith('###') || (t.startsWith('#') && t.split('#').length - 1 === 3)) {
+          htmlContent += `<!-- wp:heading {"level":3} -->\n<h3>${mdToHtml(t.replace(/^#+\s*/, ''))}</h3>\n<!-- /wp:heading -->\n\n`;
+        } else if (t.startsWith('#') || isHeading(t)) {
+          htmlContent += `<!-- wp:heading -->\n<h2>${mdToHtml(t.replace(/^#+\s*/, ''))}</h2>\n<!-- /wp:heading -->\n\n`;
+        } else {
+          htmlContent += `<!-- wp:paragraph -->\n<p>${mdToHtml(t)}</p>\n<!-- /wp:paragraph -->\n\n`;
         }
-
-        if (done) {
-          // CRITICAL FIX: parse any remaining data left in buffer after stream ends
-          // (happens when the last chunk has no trailing newline)
-          if (buffer.trim()) {
-            parseLines('\n'); // force-flush the buffer
+        activeImages.filter((img: any) => img.placement === `after paragraph ${idx}`).forEach((img: any) => {
+          const wpMedia = wpImageMap[img.id];
+          const cleanTitle = img.seoFilename.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+          if (wpMedia) {
+            htmlContent += `<!-- wp:image {"id":${wpMedia.id},"sizeSlug":"large","linkDestination":"none"} -->\n<figure class="wp-block-image size-large"><img src="${wpMedia.url}" alt="${img.altText || ''}" class="wp-image-${wpMedia.id}" title="${cleanTitle}"/>${img.caption ? `<figcaption class="wp-element-caption">${img.caption}</figcaption>` : ''}</figure>\n<!-- /wp:image -->\n\n`;
           }
-          break;
-        }
-      }
-
-      // Throw server-side error AFTER breaking out of the read loop
-      if (streamError) {
-        throw new Error(streamError);
-      }
-
-      if (successData && successData.success) {
-        setPostStatus({
-          type: 'success',
-          message: `Post successfully created! View here: ${successData.link}`
         });
-      } else {
-        throw new Error("Failed to retrieve publication confirmation.");
+      });
+
+      // Step 5: Create the WordPress post
+      setPublishProgress('Creating WordPress post...');
+      const featuredMediaId = featuredImage && wpImageMap[featuredImage.id] ? wpImageMap[featuredImage.id].id : 0;
+
+      const postRes = await fetch(`${cleanWpUrl}/wp-json/wp/v2/posts`, {
+        method: 'POST',
+        headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: fullProject.seoData?.seoTitle || fullProject.title,
+          content: htmlContent,
+          excerpt: fullProject.seoData?.metaDescription || '',
+          status: status || 'draft',
+          slug: fullProject.seoData?.slug || '',
+          categories: fullProject.selectedCategoryIds || [],
+          tags: tagIds,
+          featured_media: featuredMediaId > 0 ? featuredMediaId : undefined,
+          meta: {
+            _yoast_wpseo_title: fullProject.seoData?.seoTitle || fullProject.title,
+            _yoast_wpseo_focuskw: fullProject.seoData?.focusKeyword || '',
+            _yoast_wpseo_metadesc: fullProject.seoData?.metaDescription || '',
+            rank_math_title: fullProject.seoData?.seoTitle || fullProject.title,
+            rank_math_description: fullProject.seoData?.metaDescription || '',
+            rank_math_focus_keyword: fullProject.seoData?.focusKeyword || '',
+          },
+        }),
+      });
+
+      if (!postRes.ok) {
+        const errData = await postRes.json().catch(() => ({}));
+        throw new Error(`WordPress error: ${errData.message || postRes.statusText}`);
       }
+
+      const livePost = await postRes.json();
+
+      // Clean up Firestore in background
+      fetch(`/api/wordpress/publish-data?projectId=${project.id}`, { method: 'DELETE' }).catch(() => {});
+
+      setPostStatus({
+        type: 'success',
+        message: `Post successfully created! View here: ${livePost.link}`,
+      });
+
     } catch (e: any) {
       setPostStatus({
         type: 'error',
-        message: `Publish Error: ${e.message || 'Failed to connect to WordPress'}`
+        message: `Publish Error: ${e.message || 'Failed to connect to WordPress'}`,
       });
     } finally {
       setIsPosting(false);
