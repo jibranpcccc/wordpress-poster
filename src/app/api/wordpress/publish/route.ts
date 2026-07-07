@@ -5,6 +5,8 @@ import { db, Project, ImageDetail } from '@/lib/db';
 
 // Per-fetch timeout: each individual WordPress API call gets 8 seconds max
 const FETCH_TIMEOUT_MS = 8000;
+// Number of images to upload simultaneously (3 keeps WordPress happy and finishes fast)
+const PARALLEL_UPLOAD_SIZE = 3;
 
 async function uploadAndSetImageSEO(
   fileBuffer: Buffer,
@@ -38,28 +40,29 @@ async function uploadAndSetImageSEO(
   const mediaId = media.id;
   const sourceUrl = media.source_url;
 
-  console.log(`[WP Media] Image uploaded successfully. ID: ${mediaId}. Updating SEO metadata...`);
+  console.log(`[WP Media] Image uploaded. ID: ${mediaId}. Updating SEO metadata...`);
 
-  // 2. Update media detail with Alt Text, Caption, and Title in WP Media Library
-  const updateRes = await fetch(`${wpUrl}/wp-json/wp/v2/media/${mediaId}`, {
-    method: 'POST',
-    headers: {
-      'Authorization': authHeader,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      alt_text: img.altText || '',
-      caption: img.caption || '',
-      title: img.seoFilename.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "),
-      description: img.notes || ''
-    }),
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
-  });
-
-  if (!updateRes.ok) {
-    console.warn(`[WP Media Warning] Failed to update SEO meta for media ID ${mediaId}: ${updateRes.statusText}`);
-  } else {
-    console.log(`[WP Media] SEO metadata updated successfully for ID ${mediaId}`);
+  // 2. Update SEO metadata (fire-and-forget style: don't wait too long)
+  try {
+    const updateRes = await fetch(`${wpUrl}/wp-json/wp/v2/media/${mediaId}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        alt_text: img.altText || '',
+        caption: img.caption || '',
+        title: img.seoFilename.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "),
+        description: img.notes || ''
+      }),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+    });
+    if (!updateRes.ok) {
+      console.warn(`[WP Media Warning] Failed to update SEO meta for media ID ${mediaId}: ${updateRes.statusText}`);
+    }
+  } catch (e) {
+    console.warn(`[WP Media Warning] SEO meta update timed out for ID ${mediaId}, continuing...`);
   }
 
   return { id: mediaId, url: sourceUrl };
@@ -72,7 +75,6 @@ async function resolveTagIds(tagsStr: string, wpUrl: string, authHeader: string)
 
   for (const name of tagNames) {
     try {
-      // 1. Search if tag already exists
       const searchRes = await fetch(`${wpUrl}/wp-json/wp/v2/tags?search=${encodeURIComponent(name)}`, {
         headers: { 'Authorization': authHeader },
         signal: AbortSignal.timeout(5000)
@@ -86,8 +88,6 @@ async function resolveTagIds(tagsStr: string, wpUrl: string, authHeader: string)
         }
       }
 
-      // 2. Create the tag if not found
-      console.log(`[WP Tags] Creating tag "${name}" on WordPress site...`);
       const createRes = await fetch(`${wpUrl}/wp-json/wp/v2/tags`, {
         method: 'POST',
         headers: {
@@ -129,23 +129,19 @@ export async function POST(request: Request) {
 
   const stream = new ReadableStream({
     async start(controller) {
-      // Track if controller has been closed to prevent double-close
       let controllerClosed = false;
 
       const sendChunk = (data: object) => {
         if (controllerClosed) return;
         try {
           controller.enqueue(encoder.encode(JSON.stringify(data) + '\n'));
-        } catch (e) {
-          // Controller may already be closed in error scenarios
-        }
+        } catch (e) {}
       };
 
       const sendProgress = (message: string) => sendChunk({ type: 'progress', message });
-      const sendKeepalive = () => sendChunk({ type: 'ping' });
 
-      // Keepalive: send a ping every 2 seconds so Netlify/CDN doesn't kill the idle connection
-      const keepaliveInterval = setInterval(sendKeepalive, 2000);
+      // Keepalive: send a ping every 2 seconds so Netlify/proxy keeps the connection alive
+      const keepaliveInterval = setInterval(() => sendChunk({ type: 'ping' }), 2000);
 
       const cleanup = () => {
         clearInterval(keepaliveInterval);
@@ -165,115 +161,113 @@ export async function POST(request: Request) {
         const cleanWpUrl = wpUrl.replace(/\/$/, "");
         const authHeader = `Basic ${Buffer.from(`${wpUser}:${wpPassword}`).toString('base64')}`;
 
-        // 2. Identify active images
         const activeImages = project.images.filter(img => !img.doNotUse);
         const featuredImage = activeImages.find(img => img.isFeatured);
-
         const uploadDir = path.join(process.cwd(), 'public');
         const wpImageMap: { [localId: string]: { id: number; url: string } } = {};
 
-        // 3. Upload images SEQUENTIALLY to stay within Netlify's 26s function timeout.
-        //    Each image gets up to ~8s (2 API calls × 4s each). 10 images = ~80s worst-case,
-        //    but in practice WordPress media uploads are fast (~1-2s each), so 10 images ≈ 15-20s total.
         sendProgress(`Uploading ${activeImages.length} image(s) to WordPress...`);
 
-        for (let idx = 0; idx < activeImages.length; idx++) {
-          const img = activeImages[idx];
-          try {
-            if (img.wpMediaId) {
-              sendProgress(`Updating pre-uploaded image ${idx + 1}/${activeImages.length} ("${img.originalName}")...`);
-              const updateRes = await fetch(`${cleanWpUrl}/wp-json/wp/v2/media/${img.wpMediaId}`, {
-                method: 'POST',
-                headers: {
-                  'Authorization': authHeader,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  alt_text: img.altText || '',
-                  caption: img.caption || '',
-                  title: img.seoFilename.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "),
-                  description: img.notes || ''
-                }),
-                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
-              });
+        // Helper: resolve image buffer from Firestore or local filesystem
+        const loadImageBuffer = async (img: ImageDetail): Promise<{ buffer: Buffer; ext: string } | null> => {
+          let fileBuffer: Buffer | null = null;
+          let ext = 'jpg';
 
-              let liveUrl = img.localPath;
-              if (updateRes.ok) {
-                try {
-                  const mediaData = await updateRes.json();
-                  liveUrl = mediaData.source_url || img.localPath;
-                } catch (e) {}
-              } else {
-                console.warn(`[WP Media Warning] Failed to update SEO meta for pre-uploaded media ID ${img.wpMediaId}: ${updateRes.statusText}`);
-                try {
-                  const getRes = await fetch(`${cleanWpUrl}/wp-json/wp/v2/media/${img.wpMediaId}`, {
-                    headers: { 'Authorization': authHeader },
-                    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
-                  });
-                  if (getRes.ok) {
-                    const mediaData = await getRes.json();
-                    liveUrl = mediaData.source_url || img.localPath;
-                  }
-                } catch (e) {}
-              }
-
-              wpImageMap[img.id] = { id: img.wpMediaId, url: liveUrl };
-              continue;
-            }
-
-            let fileBuffer: Buffer | null = null;
-            let ext = 'jpg';
-
-            // Load from Firestore
-            if (img.localPath.includes('?id=')) {
+          if (img.localPath.includes('?id=')) {
+            try {
               const urlObj = new URL(img.localPath, 'http://localhost');
               const imageId = urlObj.searchParams.get('id');
               if (imageId) {
                 const imgAsset = await db.getImage(imageId);
                 if (imgAsset) {
                   fileBuffer = Buffer.from(imgAsset.base64Data, 'base64');
-                  ext = path.extname(imageId).replace('.', '').toLowerCase();
-                  console.log(`[WP Media] Loaded image "${img.originalName}" (${imageId}) from Firestore.`);
+                  ext = path.extname(imageId).replace('.', '').toLowerCase() || 'jpg';
                 }
               }
-            }
+            } catch (e) {}
+          }
 
-            // Fallback: local files
-            if (!fileBuffer) {
-              let checkPath = img.localPath;
-              if (checkPath.includes('?id=')) {
-                try {
-                  const urlObj = new URL(checkPath, 'http://localhost');
-                  const imageId = urlObj.searchParams.get('id');
-                  if (imageId) checkPath = `/uploads/${imageId}`;
-                } catch (e) {}
-              }
-              const fullPath = path.join(uploadDir, checkPath.replace(/^\//, ''));
-              if (fs.existsSync(fullPath)) {
-                fileBuffer = fs.readFileSync(fullPath);
-                ext = path.extname(checkPath).replace('.', '').toLowerCase();
-                console.log(`[WP Media] Loaded image "${img.originalName}" from local filesystem fallback.`);
-              } else {
-                console.warn(`Image file not found locally or in Firestore at: ${img.localPath}`);
-              }
+          if (!fileBuffer) {
+            let checkPath = img.localPath;
+            if (checkPath.includes('?id=')) {
+              try {
+                const urlObj = new URL(checkPath, 'http://localhost');
+                const imageId = urlObj.searchParams.get('id');
+                if (imageId) checkPath = `/uploads/${imageId}`;
+              } catch (e) {}
             }
+            const fullPath = path.join(uploadDir, checkPath.replace(/^\//, ''));
+            if (fs.existsSync(fullPath)) {
+              fileBuffer = fs.readFileSync(fullPath);
+              ext = path.extname(checkPath).replace('.', '').toLowerCase() || 'jpg';
+            }
+          }
 
-            if (fileBuffer) {
-              sendProgress(`Uploading image ${idx + 1}/${activeImages.length} ("${img.originalName}")...`);
-              const wpMedia = await uploadAndSetImageSEO(fileBuffer, ext, img, cleanWpUrl, authHeader);
-              wpImageMap[img.id] = wpMedia;
-            } else {
-              console.warn(`[WP Media] Skipping image "${img.originalName}" — no buffer available.`);
-              sendProgress(`Warning: Skipping image "${img.originalName}" — could not load file.`);
-            }
-          } catch (mediaErr: any) {
-            console.error(`Failed uploading image ${img.originalName} to WordPress:`, mediaErr);
-            sendProgress(`Warning: Could not upload "${img.originalName}" (${mediaErr.message || mediaErr}). Continuing...`);
-            // Non-fatal: keep going with remaining images
+          return fileBuffer ? { buffer: fileBuffer, ext } : null;
+        };
+
+        // Upload all images in parallel batches of PARALLEL_UPLOAD_SIZE
+        // 3 parallel × ~2s per image = batches finish in ~2s each
+        // 10 images = 4 batches = ~8s total — well within 26s Netlify limit
+        for (let i = 0; i < activeImages.length; i += PARALLEL_UPLOAD_SIZE) {
+          const batch = activeImages.slice(i, i + PARALLEL_UPLOAD_SIZE);
+          const batchNum = Math.floor(i / PARALLEL_UPLOAD_SIZE) + 1;
+          const totalBatches = Math.ceil(activeImages.length / PARALLEL_UPLOAD_SIZE);
+          sendProgress(`Uploading images batch ${batchNum}/${totalBatches} (${batch.length} image${batch.length > 1 ? 's' : ''})...`);
+
+          const batchResults = await Promise.all(
+            batch.map(async (img, bIdx) => {
+              const globalIdx = i + bIdx;
+              try {
+                // Handle pre-uploaded images
+                if (img.wpMediaId) {
+                  try {
+                    const updateRes = await fetch(`${cleanWpUrl}/wp-json/wp/v2/media/${img.wpMediaId}`, {
+                      method: 'POST',
+                      headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        alt_text: img.altText || '',
+                        caption: img.caption || '',
+                        title: img.seoFilename.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "),
+                        description: img.notes || ''
+                      }),
+                      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+                    });
+                    let liveUrl = img.localPath;
+                    if (updateRes.ok) {
+                      try { const d = await updateRes.json(); liveUrl = d.source_url || img.localPath; } catch (e) {}
+                    }
+                    return { localId: img.id, wpMedia: { id: img.wpMediaId, url: liveUrl } };
+                  } catch (e: any) {
+                    console.warn(`Pre-uploaded image ${img.wpMediaId} update failed: ${e.message}`);
+                    return { localId: img.id, wpMedia: { id: img.wpMediaId, url: img.localPath } };
+                  }
+                }
+
+                // Load image buffer
+                const loaded = await loadImageBuffer(img);
+                if (!loaded) {
+                  console.warn(`[WP Media] No buffer for "${img.originalName}" — skipping.`);
+                  return null;
+                }
+
+                const wpMedia = await uploadAndSetImageSEO(loaded.buffer, loaded.ext, img, cleanWpUrl, authHeader);
+                return { localId: img.id, wpMedia };
+              } catch (mediaErr: any) {
+                console.error(`Failed uploading image ${img.originalName}:`, mediaErr.message);
+                sendProgress(`Warning: Could not upload "${img.originalName}" — skipping.`);
+                return null;
+              }
+            })
+          );
+
+          // Merge results into wpImageMap
+          for (const res of batchResults) {
+            if (res) wpImageMap[res.localId] = res.wpMedia;
           }
         }
 
-        // 4. Determine featured media ID
+        // Determine featured media ID
         let wpFeaturedMediaId = 0;
         if (featuredImage && wpImageMap[featuredImage.id]) {
           wpFeaturedMediaId = wpImageMap[featuredImage.id].id;
@@ -283,22 +277,12 @@ export async function POST(request: Request) {
           const lines = text.split('\n');
           const filtered = lines.filter(line => {
             const cleanLine = line.trim().replace(/^[\*\s_\x22\x27\u201C\u201D\[]+/, '').toLowerCase();
-            if (cleanLine.startsWith('image:') || cleanLine.startsWith('image]') || cleanLine.startsWith('[image:')) {
-              return false;
-            }
-            if (cleanLine.startsWith('alt text:') || cleanLine.startsWith('alt tag:') || cleanLine.startsWith('alttag:')) {
-              return false;
-            }
-            if (cleanLine.startsWith('caption:')) {
-              return false;
-            }
-            if (cleanLine.startsWith('filename:') || cleanLine.startsWith('seo filename:')) {
-              return false;
-            }
+            if (cleanLine.startsWith('image:') || cleanLine.startsWith('image]') || cleanLine.startsWith('[image:')) return false;
+            if (cleanLine.startsWith('alt text:') || cleanLine.startsWith('alt tag:') || cleanLine.startsWith('alttag:')) return false;
+            if (cleanLine.startsWith('caption:')) return false;
+            if (cleanLine.startsWith('filename:') || cleanLine.startsWith('seo filename:')) return false;
             const trimmedRaw = line.trim();
-            if (trimmedRaw === '*' || trimmedRaw === '**' || trimmedRaw === '_' || trimmedRaw === '__') {
-              return false;
-            }
+            if (trimmedRaw === '*' || trimmedRaw === '**' || trimmedRaw === '_' || trimmedRaw === '__') return false;
             return true;
           });
           return filtered.join('\n');
@@ -325,8 +309,7 @@ export async function POST(request: Request) {
           if (/[.\?!]$/.test(trimmed)) return false;
           if (trimmed.includes('<') && trimmed.includes('>')) return false;
           if (!/^[A-Z0-9\x22\x27\u201C\u201D]/.test(trimmed)) return false;
-          const words = trimmed.split(/\s+/);
-          if (words.length > 12) return false;
+          if (trimmed.split(/\s+/).length > 12) return false;
           return true;
         };
 
@@ -358,11 +341,11 @@ export async function POST(request: Request) {
           });
         });
 
-        // 5.5 Resolve tags
+        // Resolve tags
         sendProgress("Resolving WordPress tags...");
         const tagIds = await resolveTagIds(project.tags || '', cleanWpUrl, authHeader);
 
-        // 6. Post final payload
+        // Create the post
         sendProgress("Creating WordPress post entry...");
         
         const postPayload: Record<string, any> = {
@@ -401,21 +384,17 @@ export async function POST(request: Request) {
 
         const livePost = await postRes.json();
         
-        // Clean up Firestore data
+        // Clean up Firestore data (non-blocking)
         sendProgress("Cleaning up project temporary data...");
         try {
           await db.deleteProject(projectId);
-          if (project.images && project.images.length > 0) {
-            for (const img of project.images) {
-              if (img.localPath && img.localPath.includes('?id=')) {
-                try {
-                  const urlObj = new URL(img.localPath, 'http://localhost');
-                  const imageId = urlObj.searchParams.get('id');
-                  if (imageId) {
-                    await db.deleteImage(imageId);
-                  }
-                } catch (pErr) {}
-              }
+          for (const img of project.images) {
+            if (img.localPath && img.localPath.includes('?id=')) {
+              try {
+                const urlObj = new URL(img.localPath, 'http://localhost');
+                const imageId = urlObj.searchParams.get('id');
+                if (imageId) await db.deleteImage(imageId);
+              } catch (pErr) {}
             }
           }
         } catch (cleanErr) {}
