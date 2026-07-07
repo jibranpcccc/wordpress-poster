@@ -276,13 +276,10 @@ ${unusedText}`;
       let successData = null;
       let streamError: string | null = null;
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
+      const parseLines = (text: string) => {
+        buffer += text;
         const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+        buffer = lines.pop() || ''; // keep incomplete last line in buffer
 
         for (const line of lines) {
           if (!line.trim()) continue;
@@ -290,8 +287,7 @@ ${unusedText}`;
           try {
             parsed = JSON.parse(line.trim());
           } catch (parseErr) {
-            // Not valid JSON — skip this line silently
-            continue;
+            continue; // skip non-JSON lines silently
           }
           if (parsed.type === 'progress') {
             setPublishProgress(parsed.message);
@@ -299,12 +295,30 @@ ${unusedText}`;
             successData = parsed.data;
           } else if (parsed.type === 'error') {
             streamError = parsed.error;
-            break;
+            return false; // signal: stop reading
           }
+          // 'ping' events are ignored (keepalive only)
+        }
+        return true; // signal: keep reading
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+
+        if (value) {
+          const text = decoder.decode(value, { stream: !done });
+          const shouldContinue = parseLines(text);
+          if (!shouldContinue) break;
         }
 
-        // Stop reading if we got an error event from server
-        if (streamError) break;
+        if (done) {
+          // CRITICAL FIX: parse any remaining data left in buffer after stream ends
+          // (happens when the last chunk has no trailing newline)
+          if (buffer.trim()) {
+            parseLines('\n'); // force-flush the buffer
+          }
+          break;
+        }
       }
 
       // Throw server-side error AFTER breaking out of the read loop
