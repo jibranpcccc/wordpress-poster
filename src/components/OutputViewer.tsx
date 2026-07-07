@@ -273,7 +273,7 @@ ${unusedText}`;
 
       const decoder = new TextDecoder();
       let buffer = '';
-      let successData = null;
+      let successData: any = null;
       let streamError: string | null = null;
 
       const parseLines = (text: string) => {
