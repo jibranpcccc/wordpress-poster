@@ -1,6 +1,6 @@
 {
   "name": "wordpress-smart-poster",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "node -e \"const fs = require('fs'); fs.rmSync('.next', { recursive: true, force: true });\" && next dev",
