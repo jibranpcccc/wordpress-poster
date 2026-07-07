@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.1] - 2026-07-07
+### Fixed
+- **Stream Reader Parse Bug**: Fixed a critical bug in `OutputViewer.tsx` where `error` events received from the server-sent stream were being silently caught inside the JSON `try/catch` block and swallowed. This caused "Failed to retrieve publication confirmation" whenever more than 2 images were uploaded, because the warning progress messages caused the loop to abort prematurely. Error events are now tracked in a dedicated `streamError` variable and thrown cleanly after the read loop completes.
+
 ## [1.0.0] - 2026-07-07
 ### Added
 - **Streaming Publish API**: Implemented real-time server-sent progress updates in `/api/wordpress/publish` to track post generation and image uploading stages, preventing browser timeouts.

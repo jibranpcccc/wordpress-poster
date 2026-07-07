@@ -274,6 +274,7 @@ ${unusedText}`;
       const decoder = new TextDecoder();
       let buffer = '';
       let successData = null;
+      let streamError: string | null = null;
 
       while (true) {
         const { value, done } = await reader.read();
@@ -285,21 +286,30 @@ ${unusedText}`;
 
         for (const line of lines) {
           if (!line.trim()) continue;
+          let parsed: any = null;
           try {
-            const parsed = JSON.parse(line.trim());
-            if (parsed.type === 'progress') {
-              setPublishProgress(parsed.message);
-            } else if (parsed.type === 'success') {
-              successData = parsed.data;
-            } else if (parsed.type === 'error') {
-              throw new Error(parsed.error);
-            }
-          } catch (e: any) {
-            if (e.message && e.message !== 'Unexpected end of JSON input') {
-              throw e;
-            }
+            parsed = JSON.parse(line.trim());
+          } catch (parseErr) {
+            // Not valid JSON — skip this line silently
+            continue;
+          }
+          if (parsed.type === 'progress') {
+            setPublishProgress(parsed.message);
+          } else if (parsed.type === 'success') {
+            successData = parsed.data;
+          } else if (parsed.type === 'error') {
+            streamError = parsed.error;
+            break;
           }
         }
+
+        // Stop reading if we got an error event from server
+        if (streamError) break;
+      }
+
+      // Throw server-side error AFTER breaking out of the read loop
+      if (streamError) {
+        throw new Error(streamError);
       }
 
       if (successData && successData.success) {
